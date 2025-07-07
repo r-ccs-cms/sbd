@@ -22,7 +22,7 @@ Sample usage examples are provided in the `/samples` directory.
 
 - This code is provided as a header-only llibrary, so no installation is required.
 
-## How to Compile the Sample Codes
+## How to Build the Sample Codes
 
 - The sample code for parallelized selected basis diagonalization is located in `sample/selected_basis_diagonalization`.
 - Edit the configuration file to suit your environment and build it with the make command.
