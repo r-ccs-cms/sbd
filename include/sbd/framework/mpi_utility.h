@@ -10,6 +10,7 @@
 #include <type_traits>
 #include <limits>
 #include <stdexcept>
+#include <vector>
 
 #include "mpi.h"
 

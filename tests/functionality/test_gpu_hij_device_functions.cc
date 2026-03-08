@@ -21,7 +21,7 @@
 
 // Enable GPU offload flags
 #define USE_DET_CACHE_OMP
-#define USE_HIJ_OMP_OFFLOAD
+#define USE_OMP_OFFLOAD
 #define SBD_TRADMODE
 #define USE_GPU
 #define __HIP_PLATFORM_AMD__
@@ -29,7 +29,7 @@
 // Enable debug output for this test
 #define HIJ_GPU_DEBUG 1
 
-#include "sbd/chemistry/basic/hij_omp_offload.h"
+#include "sbd/chemistry/basic/omp_offload.h"
 #include "sbd/sbd.h"
 
 using namespace sbd;
@@ -389,8 +389,8 @@ int main() {
   std::cout << "SBD Hij Device Function Unit Tests\n";
   std::cout << "======================================\n";
 
-#ifdef USE_HIJ_OMP_OFFLOAD
-  std::cout << "✓ USE_HIJ_OMP_OFFLOAD enabled\n";
+#ifdef USE_OMP_OFFLOAD
+  std::cout << "✓ USE_OMP_OFFLOAD enabled\n";
 #endif
 #ifdef HIJ_GPU_DEBUG
   std::cout << "✓ HIJ_GPU_DEBUG enabled\n";

@@ -59,10 +59,10 @@ namespace sbd {
     std::vector<size_t> SinglesFromBeta_flat;
     std::vector<size_t> DoublesFromBeta_flat;    
 
-    std::vector<size_t> SinglesAlphaCrAn_flat;
-    std::vector<size_t> DoublesAlphaCrAn_flat;
-    std::vector<size_t> SinglesBetaCrAn_flat;
-    std::vector<size_t> DoublesBetaCrAn_flat;    
+    std::vector<int> SinglesAlphaCrAn_flat;
+    std::vector<int> DoublesAlphaCrAn_flat;
+    std::vector<int> SinglesBetaCrAn_flat;
+    std::vector<int> DoublesBetaCrAn_flat;    
 
   };
 
@@ -588,24 +588,28 @@ void FreeHelpers(std::vector<TaskHelpers> &helper) {
 
   helper.SinglesFromAlpha_flat.resize(singles_alpha_total);
   helper.DoublesFromAlpha_flat.resize(doubles_alpha_total);
-  helper.SinglesAlphaCrAn_flat.resize(singles_alpha_total);
-  helper.DoublesAlphaCrAn_flat.resize(doubles_alpha_total);
+  helper.SinglesAlphaCrAn_flat.resize(2 * singles_alpha_total);
+  helper.DoublesAlphaCrAn_flat.resize(4 * doubles_alpha_total);
   helper.SinglesFromBeta_flat.resize(singles_beta_total);
   helper.DoublesFromBeta_flat.resize(doubles_beta_total);
-  helper.SinglesBetaCrAn_flat.resize(singles_beta_total);
-  helper.DoublesBetaCrAn_flat.resize(doubles_beta_total);
+  helper.SinglesBetaCrAn_flat.resize(2 * singles_beta_total);
+  helper.DoublesBetaCrAn_flat.resize(4 * doubles_beta_total);
 
   for (size_t i = 0; i < nAlpha; i++) {
     for (size_t j = 0; j < helper.SinglesFromAlphaLen[i]; j++) {
       helper.SinglesFromAlpha_flat[helper.SinglesFromAlphaOffset[i] + j] =
           helper.SinglesFromAlphaSM[i][j];
-      helper.SinglesAlphaCrAn_flat[helper.SinglesFromAlphaOffseti] + j] =
+    }
+    for (size_t j = 0; j < 2 * helper.SinglesFromAlphaLen[i]; j++) {
+      helper.SinglesAlphaCrAn_flat[2 * helper.SinglesFromAlphaOffset[i] + j] =
           helper.SinglesAlphaCrAnSM[i][j];
     }
     for (size_t j = 0; j < helper.DoublesFromAlphaLen[i]; j++) {
       helper.DoublesFromAlpha_flat[helper.DoublesFromAlphaOffset[i] + j] =
           helper.DoublesFromAlphaSM[i][j];
-      helper.DoublesAlphaCrAn_flat[helper.DoublesFromAlphaOffset[i] + j] =
+    }
+    for (size_t j = 0; j < 4 * helper.DoublesFromAlphaLen[i]; j++) {
+      helper.DoublesAlphaCrAn_flat[4 * helper.DoublesFromAlphaOffset[i] + j] =
           helper.DoublesAlphaCrAnSM[i][j];
     }
   }
@@ -614,13 +618,17 @@ void FreeHelpers(std::vector<TaskHelpers> &helper) {
     for (size_t j = 0; j < helper.SinglesFromBetaLen[i]; j++) {
       helper.SinglesFromBeta_flat[helper.SinglesFromBetaOffset[i] + j] =
           helper.SinglesFromBetaSM[i][j];
-      helper.SinglesBetaCrAn_flat[helper.SinglesFromBetaOffset[i] + j] =
+    }
+    for (size_t j = 0; j < 2 * helper.SinglesFromBetaLen[i]; j++) {
+      helper.SinglesBetaCrAn_flat[2 * helper.SinglesFromBetaOffset[i] + j] =
           helper.SinglesBetaCrAnSM[i][j];
     }
     for (size_t j = 0; j < helper.DoublesFromBetaLen[i]; j++) {
       helper.DoublesFromBeta_flat[helper.DoublesFromBetaOffset[i] + j] =
           helper.DoublesFromBetaSM[i][j];
-      helper.DoublesBetaCrAn_flat[helper.DoublesFromBetaOffset[i] + j] =
+    }
+    for (size_t j = 0; j < 4 * helper.DoublesFromBetaLen[i]; j++) {
+      helper.DoublesBetaCrAn_flat[4 * helper.DoublesFromBetaOffset[i] + j] =
           helper.DoublesBetaCrAnSM[i][j];
     }
   }

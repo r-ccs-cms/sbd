@@ -32,7 +32,7 @@ ifeq ($(GPU),1)
     ROCM_LIB := $(ROCM_PATH)/lib
 
     CXXFLAGS += -DUSE_GPU -D__HIP_PLATFORM_AMD__ \
-                -DUSE_DET_CACHE_OMP -DUSE_HIJ_OMP_OFFLOAD -DSBD_TRADMODE \
+                -DUSE_DET_CACHE_OMP -DUSE_OMP_OFFLOAD -DSBD_TRADMODE \
                 -I$(ROCM_INCLUDE) \
                 -I$(ROCM_INCLUDE)/hip \
                 -fopenmp-targets=amdgcn-amd-amdhsa \

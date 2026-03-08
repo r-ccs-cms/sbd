@@ -1,13 +1,13 @@
 /**
-@file sbd/chemistry/basic/hij_omp_offload.h
+@file sbd/chemistry/basic/omp_offload.h
 @brief OpenMP target offload implementation of batched Hij computation
 */
-#ifndef SBD_CHEMISTRY_BASIC_HIJ_OMP_OFFLOAD_H
-#define SBD_CHEMISTRY_BASIC_HIJ_OMP_OFFLOAD_H
+#ifndef SBD_CHEMISTRY_BASIC_OMP_OFFLOAD_H
+#define SBD_CHEMISTRY_BASIC_OMP_OFFLOAD_H
 
 #include "sbd/framework/type_def.h"
 
-#ifdef USE_HIJ_OMP_OFFLOAD
+#ifdef USE_OMP_OFFLOAD
 
 #include <limits> // For std::numeric_limits (bisection test)
 
@@ -178,7 +178,7 @@ inline ElemT OneExcite_device(const size_t *det, size_t bit_length, int i,
                               int a, const ElemT *I1, const ElemT *I2, int norbs_spin) {
   double sgn = 1.0;
   parity_device<ElemT>(det, bit_length, (i < a) ? i : a, (i > a) ? i : a, sgn);
-  int idx_ai = a * norbs_spin + i; 
+  int idx_ai = a * norbs_spin + i;
   ElemT energy = I1[idx_ai];
   int dsize = (norbs_spin + bit_length - 1) / bit_length;
   for (int x = 0; x < dsize; x++) {
@@ -220,53 +220,6 @@ inline ElemT TwoExcite_device(const size_t *det, size_t bit_length, int i,
   ElemT term2 = twoInt_device(A, J, B, I, I2);
 
   return ElemT(sgn) * (term1 - term2);
-}
-
-// Main device-side ComputeHij function
-template <typename ElemT>
-inline ElemT ComputeHij(const size_t *DetI, const size_t *DetJ,
-                        size_t bit_length, size_t norbs, const ElemT &I0,
-                        const ElemT *I1, const ElemT *I2,
-                        const ElemT *I2_Direct, const ElemT *I2_Exchange) {
-  int c[2] = {0, 0};
-  int d[2] = {0, 0};
-  int nc = 0;
-  int nd = 0;
-
-  size_t full_words = (2 * norbs + bit_length - 1) / bit_length;
-
-  // Count orbital differences
-  for (size_t i = 0; i < full_words; ++i) {
-    size_t diff_c = DetI[i] & ~DetJ[i];
-    size_t diff_d = DetJ[i] & ~DetI[i];
-
-    for (size_t bit_pos = 0; bit_pos < bit_length; ++bit_pos) {
-      if (diff_c & (size_t(1) << bit_pos)) {
-        if (nc < 2)
-          c[nc] = i * bit_length + bit_pos;
-        nc++;
-      }
-      if (diff_d & (size_t(1) << bit_pos)) {
-        if (nd < 2)
-          d[nd] = i * bit_length + bit_pos;
-        nd++;
-      }
-    }
-  }
-
-  ElemT result = ElemT(0.0);
-  if (nc == 0) {
-    result = ZeroExcite_device(DetJ, bit_length, norbs, I0, I1, I2_Direct,
-                               I2_Exchange, norbs, 2 * norbs);
-  } 
-  else if (nc == 1) {
-    result = OneExcite_device(DetJ, bit_length, d[0], c[0], I1, I2, 2 * norbs);
-  } 
-  else if (nc == 2) {
-    result = TwoExcite_device(DetJ, bit_length, d[0], d[1], c[0], c[1], I2);
-  }
-
-  return result;
 }
 
 // Device-side determinant computation (TRADMODE version)
@@ -352,39 +305,8 @@ inline void ComputeDetFromAlphaBeta_Naive(const size_t *A, const size_t *B,
 
 #pragma omp end declare target
 
-// Batched Hij computation on GPU using OpenMP target offload
-template <typename ElemT>
-void Hij_Batch_OMP(const size_t *det_cache, const size_t *bra_ia,
-                   const size_t *bra_ib, const size_t *ket_ja,
-                   const size_t *ket_jb, const ElemT &I0, const ElemT *I1,
-                   const ElemT *I2, ElemT *hij_results, size_t batch_size,
-                   size_t bit_length, size_t norbs, size_t n_alpha,
-                   size_t n_beta, size_t det_size, size_t I1_size,
-                   size_t I2_size) {
-
-  // det_cache is already GPU-resident (target enter data)
-  // Use map(alloc:) to reuse existing GPU allocation without copying
-  size_t det_cache_size = n_alpha * n_beta * det_size;
-
-#pragma omp target teams distribute parallel for map(                          \
-        to : bra_ia[0 : batch_size], bra_ib[0 : batch_size],                   \
-            ket_ja[0 : batch_size], ket_jb[0 : batch_size], I1[0 : I1_size],   \
-            I2[0 : I2_size], I0, n_beta, det_size, bit_length, norbs)          \
-    map(alloc : det_cache[0 : det_cache_size])                                 \
-    map(from : hij_results[0 : batch_size])
-  for (size_t idx = 0; idx < batch_size; idx++) {
-    size_t bra_offset = (bra_ia[idx] * n_beta + bra_ib[idx]) * det_size;
-    size_t ket_offset = (ket_ja[idx] * n_beta + ket_jb[idx]) * det_size;
-
-    const size_t *DetI = &det_cache[bra_offset];
-    const size_t *DetJ = &det_cache[ket_offset];
-
-    hij_results[idx] = ComputeHij(DetI, DetJ, bit_length, norbs, I0, I1, I2);
-  }
-}
-
 } // namespace sbd
 
-#endif // USE_HIJ_OMP_OFFLOAD
+#endif // USE_OMP_OFFLOAD
 
-#endif // SBD_CHEMISTRY_BASIC_HIJ_OMP_OFFLOAD_H
+#endif // SBD_CHEMISTRY_BASIC_OMP_OFFLOAD_H

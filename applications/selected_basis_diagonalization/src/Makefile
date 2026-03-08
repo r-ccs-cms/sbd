@@ -42,7 +42,7 @@ endif
 # NVIDIA A100 sm_80,  H100 sm_90,  GB200 sm_100, etc.
 #-----------------------------------------------------------------------------
 ifeq ($(GPU),1)
-    REQUIRED_CXXFLAGS += -DUSE_GPU -DUSE_DET_CACHE_OMP -DUSE_HIJ_OMP_OFFLOAD \
+    REQUIRED_CXXFLAGS += -DUSE_GPU -DUSE_DET_CACHE_OMP -DUSE_OMP_OFFLOAD \
 		-fopenmp-targets=amdgcn-amd-amdhsa --offload-arch=gfx90a \
                 -fopenmp-offload-mandatory -foffload-lto
     REQUIRED_LDFLAGS += -foffload-lto

@@ -69,6 +69,8 @@ int main(int argc, char *argv[]) {
   double energy;
   std::vector<double> density;
   std::vector<std::vector<size_t>> cobits;
+  std::vector<std::vector<size_t>> co_adet;
+  std::vector<std::vector<size_t>> co_bdet;  
   std::vector<std::vector<double>> one_p_rdm;
   std::vector<std::vector<double>> two_p_rdm;
   sbd::FCIDump fcidump;
@@ -78,9 +80,9 @@ int main(int argc, char *argv[]) {
 #ifdef SBD_FILEIN
 
   sbd::tpb::diag(comm, sbd_data, fcifumpfile, adetfile, loadname, savename,
-                 energy, density, cobits, one_p_rdm, two_p_rdm);
+                 energy, density, cobits, co_adet, co_bdet, one_p_rdm, two_p_rdm);
 
-
+  cobits = co_adet;
   if (mpi_rank == 0) {
     fcidump = sbd::LoadFCIDump(fcidumpfile);
   }
@@ -131,8 +133,8 @@ int main(int argc, char *argv[]) {
   }
 
   sbd::tpb::diag(comm, sbd_data, fcidump, adet, bdet, loadname, savename,
-                 energy, density, cobits, one_p_rdm, two_p_rdm);
-
+                 energy, density, co_adet, co_bdet, one_p_rdm, two_p_rdm);
+  cobits = co_adet;
 #endif
 
   if (mpi_rank == 0) {

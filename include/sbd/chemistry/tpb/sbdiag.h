@@ -5,8 +5,8 @@
 #ifndef SBD_CHEMISTRY_TPB_SBDIAG_H
 #define SBD_CHEMISTRY_TPB_SBDIAG_H
 
-#ifdef USE_HIJ_OMP_OFFLOAD
-#include "../basic/hij_omp_offload.h"
+#ifdef USE_OMP_OFFLOAD
+#include "../basic/omp_offload.h"
 #endif
 
 namespace sbd {
@@ -170,7 +170,7 @@ namespace sbd {
 
       int norbs = L;
 
-#ifdef USE_HIJ_OMP_OFFLOAD
+#ifdef USE_OMP_OFFLOAD
       // Flatten I1/I2 integrals once and keep on GPU for all tasks
       I1_size = (2 * norbs) * (2 * norbs);
       I2_size = (norbs * (norbs + 1) / 2) * ((norbs * (norbs + 1) / 2) + 1) / 2;
@@ -455,6 +455,7 @@ namespace sbd {
 	std::vector<double> C(W.size(),0.0);
 
 	auto time_start_mult = std::chrono::high_resolution_clock::now();
+#endif
 #ifdef SBD_THRUST
 	sbd::mult(hii, W, C, device_data,
 		  adet_comm_size, bdet_comm_size,
@@ -480,8 +481,8 @@ namespace sbd {
 	energy = E;
 
       }
-
-#ifdef USE_HIJ_OMP_OFFLOAD
+#endif
+#ifdef USE_OMP_OFFLOAD
       // Clean up GPU memory for integrals
 #pragma omp target exit data map(delete : I1_ptr[0 : I1_size],                    \
                                           I2_ptr[0 : I2_size],                     \
