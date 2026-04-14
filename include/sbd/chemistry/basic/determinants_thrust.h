@@ -6,6 +6,15 @@
 #ifndef SBD_CHEMISTRY_BASIC_DETERMINANTS_THRUST_H
 #define SBD_CHEMISTRY_BASIC_DETERMINANTS_THRUST_H
 
+// Portable popcount: __popcll is device-only in nvcc but host+device in nvc++
+inline __host__ __device__ int sbd_popcll(unsigned long long x) {
+#ifdef __CUDA_ARCH__
+    return __popcll(x);
+#else
+    return __builtin_popcountll(x);
+#endif
+}
+
 namespace sbd
 {
 
@@ -20,9 +29,9 @@ protected:
     size_t D_size;      // the vector length of a full (i.e., alpha + beta) determinant
     size_t D_half_size; // the vector length of a half (i.e., alpha or beta) determinant
 public:
-    DeterminantKernels() {}
+    __host__ __device__ DeterminantKernels() {}
 
-    DeterminantKernels(const size_t bit_length_in, const size_t norbs_in,
+    __host__ __device__ DeterminantKernels(const size_t bit_length_in, const size_t norbs_in,
                         const ElemT zero_in,
                         const oneInt_Thrust<ElemT> one_in,
                         const twoInt_Thrust<ElemT> two_in
@@ -71,25 +80,25 @@ public:
         if (blockStart == blockEnd) {
             // the case where start and end is same block
             size_t mask = ((size_t(1) << bitEnd) - 1) ^ ((size_t(1) << bitStart) - 1);
-            nonZeroBits += __popcll(dets[blockStart] & mask);
+            nonZeroBits += sbd_popcll(dets[blockStart] & mask);
         }
         else {
             // 2. Handle the partial bits in the start block
             if (bitStart != 0) {
                 size_t mask = ~((size_t(1) << bitStart) - 1); // count after bitStart
-                nonZeroBits += __popcll(dets[blockStart] & mask);
+                nonZeroBits += sbd_popcll(dets[blockStart] & mask);
                 blockStart++;
             }
 
             // 3. Handle full blocks in between
             for (size_t i = blockStart; i < blockEnd; i++) {
-                nonZeroBits += __popcll(dets[i]);
+                nonZeroBits += sbd_popcll(dets[i]);
             }
 
             // 4. Handle the partial bits in the end block
             if (bitEnd != 0) {
                 size_t mask = (size_t(1) << bitEnd) - 1; // count before bitEnd
-                nonZeroBits += __popcll(dets[blockEnd] & mask);
+                nonZeroBits += sbd_popcll(dets[blockEnd] & mask);
             }
         }
 

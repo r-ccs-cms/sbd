@@ -51,9 +51,9 @@ public:
     size_t size_single_beta = 0;
     size_t size_double_beta = 0;
 
-    TaskHelpersThrust() {}
+    __host__ __device__ TaskHelpersThrust() {}
 
-    TaskHelpersThrust(const TaskHelpersThrust<ElemT>& other)
+    __host__ __device__ TaskHelpersThrust(const TaskHelpersThrust<ElemT>& other)
     {
         braAlphaStart = other.braAlphaStart;
         braAlphaEnd = other.braAlphaEnd;

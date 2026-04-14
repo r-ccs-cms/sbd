@@ -14,6 +14,7 @@
 
 
 #include "sbd/framework/thrust_kernels.h"
+#include <thrust/execution_policy.h>
 
 namespace sbd
 {
@@ -46,10 +47,8 @@ template <typename ElemT>
 void GetTotalD_Thrust(const thrust::device_vector<ElemT> & hii,
         thrust::device_vector<ElemT>& dii,
         MPI_Comm h_comm) {
-    int size_d = hii.size();
-    dii.resize(hii.size());
-    MPI_Datatype DataT = GetMpiType<ElemT>::MpiT;
-    MPI_Allreduce((ElemT*)thrust::raw_pointer_cast(hii.data()), (ElemT*)thrust::raw_pointer_cast(dii.data()), size_d, DataT, MPI_SUM, h_comm);
+    dii = hii;
+    MpiAllreduce(dii, MPI_SUM, h_comm);
 }
 
 /**

@@ -23,7 +23,7 @@ protected:
     ElemT* store;
     int norbs;
 public:
-    oneInt_Thrust() {}
+    __host__ __device__ oneInt_Thrust() {}
 
     oneInt_Thrust(const thrust::device_vector<ElemT>& v, int n)
     {
@@ -31,7 +31,7 @@ public:
         norbs = n;
     }
 
-    oneInt_Thrust(const oneInt_Thrust& other)
+    __host__ __device__ oneInt_Thrust(const oneInt_Thrust& other)
     {
         store = other.store;
         norbs = other.norbs;
@@ -54,7 +54,7 @@ protected:
     ElemT* DirectMat;
     ElemT* ExchangeMat;
 public:
-    twoInt_Thrust() : zero(0.0), maxEntry(100.0) {}
+    __host__ __device__ twoInt_Thrust() : zero(0.0), maxEntry(100.0) {}
 
     twoInt_Thrust(const thrust::device_vector<ElemT>& v, int n, const thrust::device_vector<ElemT>& dm, const thrust::device_vector<ElemT>& em, ElemT z = 0.0, ElemT mx = 100.0)  : zero(z), maxEntry(mx)
     {
@@ -64,7 +64,7 @@ public:
         ExchangeMat = (ElemT*)thrust::raw_pointer_cast(em.data());
     }
 
-    twoInt_Thrust(const twoInt_Thrust& other)
+    __host__ __device__ twoInt_Thrust(const twoInt_Thrust& other)
     {
         store = other.store;
         norbs = other.norbs;

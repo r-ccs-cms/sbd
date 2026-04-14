@@ -30,9 +30,9 @@ public:
     size_t size_adet = 0;
     size_t size_bdet = 0;
 
-    DetIndexMapThrust() {}
+    __host__ __device__ DetIndexMapThrust() {}
 
-    DetIndexMapThrust(const DetIndexMapThrust& other)
+    __host__ __device__ DetIndexMapThrust(const DetIndexMapThrust& other)
     {
         AdetToDetOffset = other.AdetToDetOffset;
         BdetToDetOffset = other.BdetToDetOffset;
@@ -196,9 +196,9 @@ public:
     size_t size_double_adet = 0;
     size_t size_double_bdet = 0;
 
-    ExcitationLookupThrust() {}
+    __host__ __device__ ExcitationLookupThrust() {}
 
-    ExcitationLookupThrust(const ExcitationLookupThrust& other)
+    __host__ __device__ ExcitationLookupThrust(const ExcitationLookupThrust& other)
     {
         slide = other.slide;
         SelfFromAdetOffset = other.SelfFromAdetOffset;
