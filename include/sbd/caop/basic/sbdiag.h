@@ -117,11 +117,11 @@ namespace sbd {
     void diag(const MPI_Comm & comm,
 	      const SBD & sbd_data,
 	      const GeneralOp<ElemT> & H,
-	      const std::vector<std::vector<size_t>> & basis,
+	      const det_vector<size_t> & basis,
 	      const std::string & loadname,
 	      const std::string & savename,
 	      double & energy,
-	      std::vector<std::vector<size_t>> & co_basis) {
+	      det_vector<size_t> & co_basis) {
       
       int mpi_master = 0;
       int mpi_rank; MPI_Comm_rank(comm,&mpi_rank);
@@ -349,7 +349,7 @@ namespace sbd {
 	      const std::string & loadname,
 	      const std::string & savename,
 	      double & energy,
-	      std::vector<std::vector<size_t>> & co_basis) {
+	      det_vector<size_t> & co_basis) {
 
       int mpi_master = 0;
       int mpi_rank; MPI_Comm_rank(comm,&mpi_rank);
@@ -409,7 +409,7 @@ namespace sbd {
 	std::cout << " " << make_timestamp()
 		  << " sbd: start load basis" << std::endl;
       }
-      std::vector<std::vector<size_t>> basis;
+      det_vector<size_t> basis;
       if( mpi_rank_h == 0 ) {
 	if( mpi_rank_t == 0 ) {
 	  load_basis_from_files(basisfiles,basis,

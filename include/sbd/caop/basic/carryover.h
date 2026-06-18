@@ -20,10 +20,10 @@ namespace sbd {
 
   template <typename ElemT, typename RealT>
   void CarryOverBasis(const std::vector<ElemT> & w,
-		      const std::vector<std::vector<size_t>> & bs,
+		      const det_vector<size_t> & bs,
 		      MPI_Comm b_comm,
 		      size_t kept,
-		      std::vector<std::vector<size_t>> & rbs,
+		      det_vector<size_t> & rbs,
 		      RealT & discarted_weight) {
     // using RealT = typename GetRealType<ElemT>::RealT;
     std::vector<RealT> r(w.size());

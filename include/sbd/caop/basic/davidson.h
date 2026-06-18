@@ -14,7 +14,7 @@ namespace sbd {
 
   template <typename ElemT>
   void InitVectorCAOP(std::vector<ElemT> & w,
-		      const std::vector<std::vector<size_t>> & basis,
+		      const det_vector<size_t> & basis,
 		      MPI_Comm h_comm,
 		      MPI_Comm b_comm,
 		      MPI_Comm t_comm,
@@ -38,7 +38,7 @@ namespace sbd {
   template <typename ElemT, typename RealT>
   void Davidson(const std::vector<ElemT> & hii,
 		std::vector<ElemT> & W,
-		const std::vector<std::vector<size_t>> & bs,
+		const det_vector<size_t> & bs,
 		const size_t bit_length,
 		const std::vector<int> & slide,
 		const GeneralOp<ElemT> & Ham,

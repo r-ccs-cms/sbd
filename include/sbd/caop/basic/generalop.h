@@ -80,7 +80,7 @@ namespace sbd {
     friend void mult(const std::vector<ElemT_> & hd,
 		     const std::vector<ElemT_> & wk,
 		     std::vector<ElemT_> & wb,
-		     const std::vector<std::vector<size_t>> & bs,
+		     const det_vector<size_t> & bs,
 		     const size_t bit_length,
 		     const std::vector<int> & slide,
 		     const GeneralOp<ElemT_> & H,
@@ -90,14 +90,14 @@ namespace sbd {
 		     MPI_Comm t_comm);
 
     template <typename ElemT_>
-    friend void makeCAOpHamDiagTerms(const std::vector<std::vector<size_t>> & bs,
+    friend void makeCAOpHamDiagTerms(const det_vector<size_t> & bs,
 				     const size_t bit_length,
 				     const std::vector<int> & slide,
 				     const GeneralOp<ElemT_> & H,
 				     std::vector<ElemT_> & hii);
 
     template <typename ElemT_>
-    friend void makeCAOpHam(const std::vector<std::vector<size_t>> & bs,
+    friend void makeCAOpHam(const det_vector<size_t> & bs,
 			    const size_t bit_length,
 			    const std::vector<int> & slide,
 			    const GeneralOp<ElemT_> & H,
@@ -330,7 +330,7 @@ namespace sbd {
     friend void mult(const std::vector<ElemT_> & hd,
 		     const std::vector<ElemT_> & wk,
 		     std::vector<ElemT_> & wb,
-		     const std::vector<std::vector<size_t>> & bs,
+		     const det_vector<size_t> & bs,
 		     const size_t bit_length,
 		     const std::vector<int> & slide,
 		     const GeneralOp<ElemT_> & H,
@@ -340,14 +340,14 @@ namespace sbd {
 		     MPI_Comm t_comm);
 
     template <typename ElemT_>
-    friend void makeCAOpHamDiagTerms(const std::vector<std::vector<size_t>> & bs,
+    friend void makeCAOpHamDiagTerms(const det_vector<size_t> & bs,
 				     const size_t bit_length,
 				     const std::vector<int> & slide,
 				     const GeneralOp<ElemT_> & H,
 				     std::vector<ElemT_> & hii);
 
     template <typename ElemT_>
-    friend void makeCAOpHam(const std::vector<std::vector<size_t>> & bs,
+    friend void makeCAOpHam(const det_vector<size_t> & bs,
 			    const size_t bit_length,
 			    const std::vector<int> & slide,
 			    const GeneralOp<ElemT_> & H,
@@ -751,7 +751,7 @@ namespace sbd {
     friend void mult(const std::vector<ElemT_> & hd,
 		     const std::vector<ElemT_> & wk,
 		     std::vector<ElemT_> & wb,
-		     const std::vector<std::vector<size_t>> & bs,
+		     const det_vector<size_t> & bs,
 		     const size_t bit_length,
 		     const std::vector<int> & slide,
 		     const GeneralOp<ElemT_> & H,
@@ -761,14 +761,14 @@ namespace sbd {
 		     MPI_Comm t_comm);
 
     template <typename ElemT_>
-    friend void makeCAOpHamDiagTerms(const std::vector<std::vector<size_t>> & bs,
+    friend void makeCAOpHamDiagTerms(const det_vector<size_t> & bs,
 				     const size_t bit_length,
 				     const std::vector<int> & slide,
 				     const GeneralOp<ElemT_> & H,
 				     std::vector<ElemT_> & hii);
 
     template <typename ElemT_>
-    friend void makeCAOpHam(const std::vector<std::vector<size_t>> & bs,
+    friend void makeCAOpHam(const det_vector<size_t> & bs,
 			    const size_t bit_length,
 			    const std::vector<int> & slide,
 			    const GeneralOp<ElemT_> & H,

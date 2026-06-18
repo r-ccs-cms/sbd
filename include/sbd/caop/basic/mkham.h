@@ -10,7 +10,7 @@
 namespace sbd {
 
   template <typename ElemT>
-  void makeCAOpHamDiagTerms(const std::vector<std::vector<size_t>> & bs,
+  void makeCAOpHamDiagTerms(const det_vector<size_t> & bs,
 			       const size_t bit_length,
 			       const std::vector<int> & slide,
 			       const GeneralOp<ElemT> & H,
@@ -44,7 +44,7 @@ namespace sbd {
   }
   
   template <typename ElemT>
-  void makeCAOpHam(const std::vector<std::vector<size_t>> & bs,
+  void makeCAOpHam(const det_vector<size_t> & bs,
 		   const size_t bit_length,
 		   const std::vector<int> & slide,
 		   const GeneralOp<ElemT> & H,
@@ -71,8 +71,8 @@ namespace sbd {
     size_t num_task = slide.size();
     size_t num_terms = H.NumOpTerms();
 
-    std::vector<std::vector<size_t>> tbs;
-    std::vector<std::vector<size_t>> rbs;
+    det_vector<size_t> tbs;
+    det_vector<size_t> rbs;
 
     if( slide.size() != 0 ) {
       if( slide[0] != 0 ) {
@@ -158,8 +158,8 @@ namespace sbd {
 					 });
 	    */
 	    auto itik = std::lower_bound(tbs.begin(),tbs.end(),vk,
-					 [](const std::vector<size_t> & x,
-					    const std::vector<size_t> & y) {
+					 [](const auto & x,
+					    const auto & y) {
 					   return sbd::less_from_back(x,y);
 					 });
 	    if( itik == tbs.end() ) continue;

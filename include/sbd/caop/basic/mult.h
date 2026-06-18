@@ -11,7 +11,7 @@ namespace sbd {
   void mult(const std::vector<ElemT> & hd,
 	    const std::vector<ElemT> & wk,
 	    std::vector<ElemT> & wb,
-	    const std::vector<std::vector<size_t>> & bs,
+	    const det_vector<size_t> & bs,
 	    const size_t bit_length,
 	    const std::vector<int> & slide,
 	    const GeneralOp<ElemT> & H,
@@ -29,8 +29,8 @@ namespace sbd {
 
     std::vector<ElemT> twk;
     std::vector<ElemT> rwk;
-    std::vector<std::vector<size_t>> tbs;
-    std::vector<std::vector<size_t>> rbs;
+    det_vector<size_t> tbs;
+    det_vector<size_t> rbs;
 
     if( slide.size() != 0 ) {
       if( slide[0] != 0 ) {
@@ -114,8 +114,8 @@ namespace sbd {
 					 });
 	    */
 	    auto itik = std::lower_bound(tbs.begin(),tbs.end(),vk,
-					 [](const std::vector<size_t> & x,
-					    const std::vector<size_t> & y) {
+					 [](const auto & x,
+					    const auto & y) {
 					   return sbd::less_from_back(x,y);
 					 });
 	    if( itik == tbs.end() ) continue;

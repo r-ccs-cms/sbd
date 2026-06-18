@@ -87,7 +87,7 @@ int main(int argc, char * argv[]) {
   }
 
   double energy;
-  std::vector<std::vector<size_t>> cobasis;
+  sbd::det_vector<size_t> cobasis;
   sbd::caop::diag<ElemType>(comm,sbd_data,hamfile,basisfiles,
 			    loadname,savename,energy,cobasis);
 

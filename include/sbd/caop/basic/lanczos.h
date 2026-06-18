@@ -14,7 +14,7 @@ namespace sbd {
   template <typename ElemT, typename RealT>
   void Lanczos(const std::vector<ElemT> & hii,
 	       std::vector<ElemT> & W,
-	       const std::vector<std::vector<size_t>> & bs,
+	       const det_vector<size_t> & bs,
 	       const size_t bit_length,
 	       const std::vector<int> & slide,
 	       const GeneralOp<ElemT> & Ham,
