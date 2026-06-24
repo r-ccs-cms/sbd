@@ -151,7 +151,7 @@ namespace sbd {
       }
       double eps = sbd_data.eps;
       size_t system_size = sbd_data.system_size;
-      size_t bit_length = sbd_data.bit_length;
+      int bit_length = (int)sbd_data.bit_length;
       bool sign = sbd_data.sign;
 
       /**

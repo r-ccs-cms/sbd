@@ -39,7 +39,7 @@ namespace sbd {
   void Davidson(const std::vector<ElemT> & hii,
 		std::vector<ElemT> & W,
 		const det_vector<size_t> & bs,
-		const size_t bit_length,
+		const int bit_length,
 		const std::vector<int> & slide,
 		const GeneralOp<ElemT> & Ham,
 		bool sign,

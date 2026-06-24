@@ -81,7 +81,7 @@ namespace sbd {
 		     const std::vector<ElemT_> & wk,
 		     std::vector<ElemT_> & wb,
 		     const det_vector<size_t> & bs,
-		     const size_t bit_length,
+		     const int bit_length,
 		     const std::vector<int> & slide,
 		     const GeneralOp<ElemT_> & H,
 		     bool sign,
@@ -331,7 +331,7 @@ namespace sbd {
 		     const std::vector<ElemT_> & wk,
 		     std::vector<ElemT_> & wb,
 		     const det_vector<size_t> & bs,
-		     const size_t bit_length,
+		     const int bit_length,
 		     const std::vector<int> & slide,
 		     const GeneralOp<ElemT_> & H,
 		     bool sign,
@@ -752,7 +752,7 @@ namespace sbd {
 		     const std::vector<ElemT_> & wk,
 		     std::vector<ElemT_> & wb,
 		     const det_vector<size_t> & bs,
-		     const size_t bit_length,
+		     const int bit_length,
 		     const std::vector<int> & slide,
 		     const GeneralOp<ElemT_> & H,
 		     bool sign,
@@ -804,16 +804,46 @@ namespace sbd {
     friend std::ostream & operator << (std::ostream & s,
 				       const GeneralOp<ElemT_> & gop);
 
+    // Precompute per-term bitmasks for fast rejection in mult (method 0).
+    // m1_[n]: bits that must be occupied in bra (creation targets in o_[n]).
+    // m2_[n]: bits that must be unoccupied in bra (annihilation targets in o_[n]).
+    // Mutable so mult() can populate lazily on first call.
+    void PrecomputeMasks(size_t bit_length) const {
+      size_t det_words = (size_t)(max_index() / (int)bit_length) + 1;
+      std::vector<size_t> zero(det_words, 0);
+      m1_ = det_vector<size_t>(o_.size(), zero);
+      m2_ = det_vector<size_t>(o_.size(), zero);
+      for (size_t n = 0; n < o_.size(); n++) {
+        for (int k = 0; k < o_[n].n_dag_; k++) {
+          size_t q = (size_t)o_[n].fops_[k].q_;
+          m1_[n][q / bit_length] |= (size_t(1) << (q % bit_length));
+        }
+        for (int k = o_[n].n_dag_; k < (int)o_[n].fops_.size(); k++) {
+          size_t q = (size_t)o_[n].fops_[k].q_;
+          m2_[n][q / bit_length] |= (size_t(1) << (q % bit_length));
+        }
+        // bits already in m1_ will be cleared before the undo-annihilation pass
+        // checks them; no bra-level check is needed for those bits in m2_.
+        for (size_t w = 0; w < det_words; w++) {
+          m2_[n][w] &= ~m1_[n][w];
+        }
+      }
+    }
+
   private:
     std::vector<ElemT> e_; // coefficient for diagonal part
     std::vector<ElemT> c_; // coefficient for off-diagonal part
     std::vector<ProductOp> d_; // diagonal part
     std::vector<ProductOp> o_; // off-diagonal part
+    mutable det_vector<size_t> m1_; // per-term occupied-required mask
+    mutable det_vector<size_t> m2_; // per-term unoccupied-required mask
     void copy(const GeneralOp & other) {
       e_ = other.e_;
       c_ = other.c_;
       d_ = other.d_;
       o_ = other.o_;
+      m1_ = other.m1_;
+      m2_ = other.m2_;
     }
 
     void init() {
@@ -821,6 +851,8 @@ namespace sbd {
       c_.resize(0);
       d_.resize(0);
       o_.resize(0);
+      m1_ = det_vector<size_t>();
+      m2_ = det_vector<size_t>();
     }
     
   }; // end GeneralOp
