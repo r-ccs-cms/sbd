@@ -340,10 +340,17 @@ class CaopMultThrust {
     thrust::device_vector<int>    d_word_start_;
     thrust::device_vector<int>    d_ndag_per_word_;
 
-    // per-task ket det sequences (precomputed at Init; fixed for all Davidson iters)
+    // per-task ket det sequences — populated lazily on the first run() call
+    // via live MPI slides, then cached on GPU for all subsequent iterations.
     std::vector<thrust::device_vector<size_t>> d_tbs_seq_;
     std::vector<size_t> n_kets_per_task_;
-    size_t global_max_kets_;
+    bool tbs_initialized_;
+
+    // local bra det_vector (CPU) — stored at Init for seeding the first-run tbs slide
+    det_vector<size_t> bs_;
+
+    // global max n_kets across b_comm ranks (Allreduce at Init; fixed for all Davidson iters)
+    size_t global_max_n_;
 
     int n_bras_;
     int n_terms_;
@@ -354,13 +361,47 @@ class CaopMultThrust {
     std::vector<int> slide_;
     MPI_Comm h_comm_, b_comm_, t_comm_;
 
+    // Compute tbs_seq via live MPI slides, upload to GPU.
+    // Called once on the first run(); results cached in d_tbs_seq_ / n_kets_per_task_.
+    void precompute_tbs_seq() {
+        size_t n_tasks = slide_.size();
+        d_tbs_seq_.resize(n_tasks);
+        n_kets_per_task_.resize(n_tasks, 0);
+
+        if (n_tasks == 0) return;
+
+        det_vector<size_t> cur_tbs;
+        if (slide_[0] != 0) {
+            MpiSlide(bs_, cur_tbs, slide_[0], b_comm_);
+        } else {
+            cur_tbs = bs_;
+        }
+
+        for (size_t task = 0; task < n_tasks; task++) {
+            n_kets_per_task_[task] = cur_tbs.size();
+            const auto& flat = cur_tbs.cflat();
+            d_tbs_seq_[task].resize(flat.size());
+            if (!flat.empty())
+                thrust::copy_n(flat.begin(), flat.size(), d_tbs_seq_[task].begin());
+
+            if (task + 1 < n_tasks) {
+                int bslide = slide_[task] - slide_[task + 1];
+                det_vector<size_t> next_tbs;
+                MpiSlide(cur_tbs, next_tbs, bslide, b_comm_);
+                cur_tbs = std::move(next_tbs);
+            }
+        }
+    }
+
 public:
-    CaopMultThrust() : n_bras_(0), n_terms_(0), elem_size_(0), sign_(false),
-                       smem_bytes_(0), global_max_kets_(0) {}
+    CaopMultThrust() : tbs_initialized_(false), global_max_n_(0),
+                       n_bras_(0), n_terms_(0), elem_size_(0),
+                       sign_(false), smem_bytes_(0) {}
 
     // Init: accepts pre-extracted GeneralOp data (m1/m2 as flat vectors,
     // terms as CaopRawTerm, c as coefficient vector). The friend mult()
     // function extracts these from GeneralOp and passes them here.
+    // Does NOT precompute tbs_seq — that happens lazily on the first run() call.
     void Init(const std::vector<ElemT>& hd,
               const det_vector<size_t>& bs,
               int bit_length,
@@ -376,6 +417,9 @@ public:
         slide_  = slide;
         n_bras_ = (int)bs.size();
         elem_size_ = (n_bras_ > 0) ? (int)bs.elem_size() : 0;
+
+        // Store local bra det_vector for seeding the first-run tbs slide
+        bs_ = bs;
 
         // Upload bras
         {
@@ -463,35 +507,10 @@ public:
             thrust::copy_n(ndag_per_word_host.begin(), ndag_per_word_host.size(), d_ndag_per_word_.begin());
         }
 
-        // Precompute tbs_seq (one MpiSlide per task; bs is fixed for all Davidson iters)
-        size_t n_tasks = slide.size();
-        d_tbs_seq_.resize(n_tasks);
-        n_kets_per_task_.resize(n_tasks, 0);
-        global_max_kets_ = 0;
-
-        if (n_tasks > 0) {
-            det_vector<size_t> cur_tbs;
-            if (!slide.empty() && slide[0] != 0) {
-                MpiSlide(bs, cur_tbs, slide[0], b_comm_);
-            } else {
-                cur_tbs = bs;
-            }
-
-            for (size_t task = 0; task < n_tasks; task++) {
-                n_kets_per_task_[task] = cur_tbs.size();
-                if (cur_tbs.size() > global_max_kets_) global_max_kets_ = cur_tbs.size();
-                const auto& flat = cur_tbs.cflat();
-                d_tbs_seq_[task].resize(flat.size());
-                if (!flat.empty())
-                    thrust::copy_n(flat.begin(), flat.size(), d_tbs_seq_[task].begin());
-
-                if (task + 1 < n_tasks) {
-                    int bslide = slide[task] - slide[task + 1];
-                    det_vector<size_t> next_tbs;
-                    MpiSlide(cur_tbs, next_tbs, bslide, b_comm_);
-                    cur_tbs = std::move(next_tbs);
-                }
-            }
+        // Compute global max n_kets for buffer sizing (fixed across all Davidson iterations)
+        {
+            size_t local_n = (size_t)n_bras_;
+            MPI_Allreduce(&local_n, &global_max_n_, 1, SBD_MPI_SIZE_T, MPI_MAX, b_comm_);
         }
 
         // Compute smem per block
@@ -508,6 +527,13 @@ public:
 
     void run(const std::vector<ElemT>& wk, std::vector<ElemT>& wb) {
         if (slide_.empty()) return;
+
+        // First call: compute tbs_seq via live MPI slides and cache on GPU.
+        // All subsequent calls use the cached d_tbs_seq_ directly.
+        if (!tbs_initialized_) {
+            precompute_tbs_seq();
+            tbs_initialized_ = true;
+        }
 
         int mpi_size_h; MPI_Comm_size(h_comm_, &mpi_size_h);
         int mpi_rank_h; MPI_Comm_rank(h_comm_, &mpi_rank_h);
@@ -526,14 +552,8 @@ public:
             twk_init = wk;
         }
 
-        // Find global max for pre-allocation
-        size_t local_ket = twk_init.size();
-        size_t gmax_ket  = global_max_kets_;
-        {
-            size_t tmp;
-            MPI_Allreduce(&local_ket, &tmp, 1, SBD_MPI_SIZE_T, MPI_MAX, b_comm_);
-            if (tmp > gmax_ket) gmax_ket = tmp;
-        }
+        // Use global_max_n_ from Init (no per-run Allreduce needed)
+        size_t gmax_ket = global_max_n_;
 
         // Allocate double buffers
         int active_buf = 0, recv_buf = 1;
@@ -629,8 +649,6 @@ public:
                                     cudaMemcpyHostToDevice, copy_stream);
                     cudaEventRecord(copy_done[recv_buf], copy_stream);
                     std::swap(active_buf, recv_buf);
-                    // After swap: twk_size[active_buf] already holds the correct recv_size
-                    // (set before the swap at twk_size[old_recv_buf]). No update needed.
                 }
             } else {
                 cudaEventSynchronize(compute_done[active_buf]);
@@ -658,8 +676,7 @@ public:
 // Declared as a friend of GeneralOp in generalop.h, so it can access
 // H.o_, H.c_, H.m1_, H.m2_ and the private members of ProductOp/CAOp.
 // Extracts them into POD structs, then forwards to CaopMultThrust.
-// Uses a static instance to avoid re-running the expensive Init
-// (MpiSlide for each task) on every Davidson/Lanczos iteration.
+// Uses a static instance to avoid re-running Init on every Davidson iteration.
 // ============================================================
 template <typename ElemT>
 void mult(const std::vector<ElemT>& hd,
