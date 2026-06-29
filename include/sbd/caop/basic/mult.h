@@ -5,8 +5,13 @@
 #ifndef SBD_CAOP_BASIC_MULT_H
 #define SBD_CAOP_BASIC_MULT_H
 
+#ifdef SBD_THRUST
+#include "sbd/caop/basic/mult_thrust.h"
+#endif
+
 namespace sbd {
 
+#ifndef SBD_THRUST
   template <typename ElemT>
   void mult(const std::vector<ElemT> & hd,
 	    const std::vector<ElemT> & wk,
@@ -137,8 +142,9 @@ namespace sbd {
     }
     MpiAllreduce(wb,MPI_SUM,t_comm);
     MpiAllreduce(wb,MPI_SUM,h_comm);
-    
+
   }
+#endif // !SBD_THRUST
 
   template <typename ElemT>
   void mult(const std::vector<ElemT> & hii,
