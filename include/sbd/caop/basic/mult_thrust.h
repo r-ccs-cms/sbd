@@ -310,6 +310,22 @@ inline void launch_caop_mult(size_t n_bras, F f, size_t smem_bytes, cudaStream_t
 }
 
 // ============================================================
+// POD structs for pre-extracted GeneralOp data.
+// CaopMultThrust::Init() takes these instead of GeneralOp directly
+// (GeneralOp members are private; only the friend mult() function
+// can read them and pass them here).
+// ============================================================
+struct CaopRawOp {
+    int q;        // orbital index
+    int is_dag;   // 1 = creation, 0 = annihilation
+};
+
+struct CaopRawTerm {
+    int n_dag;                    // number of leading creation ops
+    std::vector<CaopRawOp> fops; // ops in original order
+};
+
+// ============================================================
 // CaopMultThrust<ElemT>: host-side driver
 // ============================================================
 template <typename ElemT>
@@ -342,10 +358,16 @@ public:
     CaopMultThrust() : n_bras_(0), n_terms_(0), elem_size_(0), sign_(false),
                        smem_bytes_(0), global_max_kets_(0) {}
 
+    // Init: accepts pre-extracted GeneralOp data (m1/m2 as flat vectors,
+    // terms as CaopRawTerm, c as coefficient vector). The friend mult()
+    // function extracts these from GeneralOp and passes them here.
     void Init(const std::vector<ElemT>& hd,
               const det_vector<size_t>& bs,
               int bit_length,
-              const GeneralOp<ElemT>& H,
+              const std::vector<ElemT>& c,
+              const std::vector<CaopRawTerm>& terms,
+              const std::vector<size_t>& m1_flat,
+              const std::vector<size_t>& m2_flat,
               bool sign,
               const std::vector<int>& slide,
               MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm) {
@@ -354,8 +376,6 @@ public:
         slide_  = slide;
         n_bras_ = (int)bs.size();
         elem_size_ = (n_bras_ > 0) ? (int)bs.elem_size() : 0;
-
-        if (H.m1_.empty()) H.PrecomputeMasks(bit_length);
 
         // Upload bras
         {
@@ -367,20 +387,14 @@ public:
         d_hd_.resize(hd.size());
         thrust::copy_n(hd.begin(), hd.size(), d_hd_.begin());
 
-        n_terms_ = (int)H.o_.size();
+        n_terms_ = (int)terms.size();
 
         if (n_terms_ > 0 && elem_size_ > 0) {
             // Upload masks
-            {
-                const auto& fm1 = H.m1_.cflat();
-                d_m1_.resize(fm1.size());
-                thrust::copy_n(fm1.begin(), fm1.size(), d_m1_.begin());
-            }
-            {
-                const auto& fm2 = H.m2_.cflat();
-                d_m2_.resize(fm2.size());
-                thrust::copy_n(fm2.begin(), fm2.size(), d_m2_.begin());
-            }
+            d_m1_.resize(m1_flat.size());
+            thrust::copy_n(m1_flat.begin(), m1_flat.size(), d_m1_.begin());
+            d_m2_.resize(m2_flat.size());
+            thrust::copy_n(m2_flat.begin(), m2_flat.size(), d_m2_.begin());
 
             // Build sorted operator tables
             const int ES = elem_size_;
@@ -392,14 +406,14 @@ public:
 
             int fpos = 0;
             for (int m = 0; m < n_terms_; m++) {
-                const auto& op   = H.o_[m];
-                int n_fops = (int)op.fops_.size();
-                int n_dag  = op.n_dag_;
+                const auto& term  = terms[m];
+                int n_fops = (int)term.fops.size();
+                int n_dag  = term.n_dag;
 
                 struct OpInfo { int orig_idx, word, bpos, type; };
                 std::vector<OpInfo> ops(n_fops);
                 for (int k = 0; k < n_fops; k++) {
-                    int q = op.fops_[k].q_;
+                    int q = term.fops[k].q;
                     ops[k] = { k, q / bit_length, q % bit_length, (k < n_dag) ? 0 : 1 };
                 }
 
@@ -410,14 +424,14 @@ public:
                     return a.orig_idx < b.orig_idx;
                 });
 
-                // Count inversions in the permutation (original_idx sequence after sort)
+                // Count inversions (number of anticommuting swaps from original to sorted order)
                 std::vector<int> perm(n_fops);
                 for (int i = 0; i < n_fops; i++) perm[i] = ops[i].orig_idx;
                 int inv = 0;
                 for (int i = 0; i < n_fops; i++)
                     for (int j = i + 1; j < n_fops; j++)
                         if (perm[i] > perm[j]) inv++;
-                coeff_host[m] = H.c_[m] * ((inv & 1) ? ElemT(-1) : ElemT(1));
+                coeff_host[m] = c[m] * ((inv & 1) ? ElemT(-1) : ElemT(1));
 
                 // Fill word_start and ndag_per_word
                 int cur_wi   = 0;
@@ -425,7 +439,6 @@ public:
                 word_start_host[m * (ES + 1) + 0] = fpos;
 
                 for (int i = 0; i < n_fops; i++) {
-                    // Advance word index while cur_word > ops[i].word
                     while (ops[i].word < cur_word) {
                         cur_wi++;
                         cur_word--;
@@ -435,7 +448,6 @@ public:
                     if (ops[i].type == 0) ndag_per_word_host[m * ES + cur_wi]++;
                     fpos++;
                 }
-                // Fill remaining word entries
                 for (int wi = cur_wi + 1; wi <= ES; wi++)
                     word_start_host[m * (ES + 1) + wi] = fpos;
             }
@@ -451,7 +463,7 @@ public:
             thrust::copy_n(ndag_per_word_host.begin(), ndag_per_word_host.size(), d_ndag_per_word_.begin());
         }
 
-        // Precompute tbs_seq (one MpiSlide per task)
+        // Precompute tbs_seq (one MpiSlide per task; bs is fixed for all Davidson iters)
         size_t n_tasks = slide.size();
         d_tbs_seq_.resize(n_tasks);
         n_kets_per_task_.resize(n_tasks, 0);
@@ -642,7 +654,12 @@ public:
 };
 
 // ============================================================
-// Free mult() — same signature as CPU version, selected by SBD_THRUST
+// Free mult() — same signature as CPU version, selected by SBD_THRUST.
+// Declared as a friend of GeneralOp in generalop.h, so it can access
+// H.o_, H.c_, H.m1_, H.m2_ and the private members of ProductOp/CAOp.
+// Extracts them into POD structs, then forwards to CaopMultThrust.
+// Uses a static instance to avoid re-running the expensive Init
+// (MpiSlide for each task) on every Davidson/Lanczos iteration.
 // ============================================================
 template <typename ElemT>
 void mult(const std::vector<ElemT>& hd,
@@ -654,9 +671,34 @@ void mult(const std::vector<ElemT>& hd,
           const GeneralOp<ElemT>& H,
           bool sign,
           MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm) {
-    CaopMultThrust<ElemT> data;
-    data.Init(hd, bs, bit_length, H, sign, slide, h_comm, b_comm, t_comm);
-    data.run(wk, wb);
+
+    static CaopMultThrust<ElemT>* driver = nullptr;
+    if (!driver) {
+        if (H.m1_.empty()) H.PrecomputeMasks(bit_length);
+
+        // Extract operator terms from GeneralOp (friend access).
+        std::vector<CaopRawTerm> terms;
+        terms.reserve(H.o_.size());
+        for (const auto& op : H.o_) {
+            CaopRawTerm t;
+            t.n_dag = op.n_dag_;
+            for (const auto& f : op.fops_)
+                t.fops.push_back({ f.q_, f.d_ ? 1 : 0 });
+            terms.push_back(std::move(t));
+        }
+
+        // Extract m1/m2 flat arrays.
+        const auto& fm1 = H.m1_.cflat();
+        const auto& fm2 = H.m2_.cflat();
+        std::vector<size_t> m1_flat(fm1.begin(), fm1.end());
+        std::vector<size_t> m2_flat(fm2.begin(), fm2.end());
+
+        driver = new CaopMultThrust<ElemT>();
+        driver->Init(hd, bs, bit_length,
+                     H.c_, terms, m1_flat, m2_flat,
+                     sign, slide, h_comm, b_comm, t_comm);
+    }
+    driver->run(wk, wb);
 }
 
 } // namespace sbd
