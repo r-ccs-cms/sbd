@@ -232,6 +232,9 @@ namespace sbd {
 	  if( rec[j] == '1' ) {
 	    size_t bit_idx = total_bit_length - 1 - j;
 	    config[i][bit_idx / bit_length] |= (size_t(1) << (bit_idx % bit_length));
+	  } else if( rec[j] != '0' ) {
+	    throw std::runtime_error(
+	      "Unexpected character in basis file: expected '0' or '1'");
 	  }
 	}
       }
