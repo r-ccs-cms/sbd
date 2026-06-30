@@ -152,21 +152,19 @@ struct CaopMultKernel {
         // Dynamic shared memory layout:
         //   s_bra  [G * (ES+1)] size_t   — bra cache, padded stride
         //   s_n    [G * BPGP]   int      — ballot candidate buffer
-        //   vk_scr [G * SW * (ES+1)] size_t — per-lane ket scratch
         //   wr_tmp [G]  WarpReduce::TempStorage
+        // vk_scr removed: compute_contribution tracks cur_w in a register per lane.
         const int ps = elem_size + 1;  // padded stride
         extern __shared__ char raw[];
-        size_t* s_bra  = (size_t*)raw;
-        int*    s_n    = (int*)(s_bra + G * ps);
-        size_t* vk_scr = (size_t*)(s_n  + G * BPGP);
+        size_t* s_bra = (size_t*)raw;
+        int*    s_n   = (int*)(s_bra + G * ps);
 
         using WR = cub::WarpReduce<ElemT, SW>;
         typename WR::TempStorage* wr_tmp =
-            (typename WR::TempStorage*)(vk_scr + G * SW * ps);
+            (typename WR::TempStorage*)(s_n + G * BPGP);
 
         size_t* my_bra = s_bra + grp * ps;
         int*    my_n   = s_n   + grp * BPGP;
-        size_t* my_vk  = vk_scr + ((size_t)grp * SW + lane) * ps;
 
         // Per-subwarp ballot mask (handles SW < 32 with multiple groups per warp)
         const unsigned lane_in_warp = (unsigned)threadIdx.x % 32u;
@@ -204,7 +202,7 @@ struct CaopMultKernel {
             if (s_count >= SW) {
                 __syncwarp(sw_mask);
                 if (lane < s_count)
-                    thread_sum += compute_contribution(my_bra, my_vk, my_n[lane]);
+                    thread_sum += compute_contribution(my_bra, my_n[lane]);
                 // compact: shift remainder left by SW
                 int next_idx = lane + SW;
                 int next_val = (next_idx < s_count) ? my_n[next_idx] : 0;
@@ -219,16 +217,18 @@ struct CaopMultKernel {
         if (s_count > 0) {
             __syncwarp(sw_mask);
             if (lane < s_count)
-                thread_sum += compute_contribution(my_bra, my_vk, my_n[lane]);
+                thread_sum += compute_contribution(my_bra, my_n[lane]);
         }
 
         ElemT total = WR(wr_tmp[grp]).Sum(thread_sum);
         if (lane == 0) d_wb[ib] += total;
     }
 
-    __device__ ElemT compute_contribution(const size_t* my_bra, size_t* my_vk, int m) {
-        for (int w = 0; w < elem_size; w++) my_vk[w] = my_bra[w];
-
+    __device__ ElemT compute_contribution(const size_t* my_bra, int m) {
+        // No vk_scr scratch: cur_w is a register tracking this word's evolving state.
+        // The outer loop descends (w = elem_size-1 .. 0), so at word w all lower
+        // words w2 < w are still my_bra[w2] — never written.  n_occ_base accumulates
+        // their popcount once per word instead of once per op.
         int sign = 1;
         size_t lo = 0, hi = (size_t)n_kets;
 
@@ -238,47 +238,53 @@ struct CaopMultKernel {
             int op_end   = d_word_start[m * (elem_size + 1) + wi + 1];
             int n_dag_w  = (op_start < op_end) ? d_ndag_per_word[m * elem_size + wi] : 0;
 
+            size_t cur_w = my_bra[w];  // register: evolves as ops are applied
+
+            // popcount of lower words — computed once per word, reused by all ops.
+            // For elem_size==1 (30-orbital common case) w==0 always, loop never runs.
+            int n_occ_base = 0;
+            if (sign_flag) {
+                for (int w2 = 0; w2 < w; w2++)
+                    n_occ_base += __popcll((unsigned long long)my_bra[w2]);
+            }
+
             // creation ops
             for (int k = op_start, ke = op_start + n_dag_w; k < ke; k++) {
                 size_t bit = (size_t)1 << d_fops_bpos[k];
-                my_vk[w] ^= bit;
+                cur_w ^= bit;
                 if (sign_flag) {
-                    long long n_occ = __popcll((unsigned long long)(my_vk[w] & (bit - 1)));
-                    for (int w2 = 0; w2 < w; w2++)
-                        n_occ += __popcll((unsigned long long)my_vk[w2]);
+                    int n_occ = __popcll((unsigned long long)(cur_w & (bit - 1))) + n_occ_base;
                     if (n_occ & 1) sign = -sign;
                 }
             }
             // annihilation ops
             for (int k = op_start + n_dag_w; k < op_end; k++) {
                 size_t bit = (size_t)1 << d_fops_bpos[k];
-                my_vk[w] |= bit;
+                cur_w |= bit;
                 if (sign_flag) {
-                    long long n_occ = __popcll((unsigned long long)(my_vk[w] & (bit - 1)));
-                    for (int w2 = 0; w2 < w; w2++)
-                        n_occ += __popcll((unsigned long long)my_vk[w2]);
+                    int n_occ = __popcll((unsigned long long)(cur_w & (bit - 1))) + n_occ_base;
                     if (n_occ & 1) sign = -sign;
                 }
             }
 
-            // lower_bound for my_vk[w]
+            // lower_bound for cur_w
             {
                 size_t L = lo, R = hi;
                 while (L < R) {
                     size_t mid = L + (R - L) / 2;
-                    if (d_tbs[mid * elem_size + w] < my_vk[w]) L = mid + 1;
+                    if (d_tbs[mid * elem_size + w] < cur_w) L = mid + 1;
                     else R = mid;
                 }
                 lo = L;
             }
-            if (lo >= hi || d_tbs[lo * elem_size + w] != my_vk[w]) return ElemT(0);
+            if (lo >= hi || d_tbs[lo * elem_size + w] != cur_w) return ElemT(0);
 
             if (w > 0) {
                 // upper_bound
                 size_t L = lo, R = hi;
                 while (L < R) {
                     size_t mid = L + (R - L) / 2;
-                    if (d_tbs[mid * elem_size + w] <= my_vk[w]) L = mid + 1;
+                    if (d_tbs[mid * elem_size + w] <= cur_w) L = mid + 1;
                     else R = mid;
                 }
                 hi = L;
@@ -521,7 +527,6 @@ public:
         int ps = elem_size_ + 1;
         smem_bytes_ = (size_t)G * ps * sizeof(size_t)          // s_bra
                     + (size_t)G * BPGP * sizeof(int)            // s_n
-                    + (size_t)G * SW * ps * sizeof(size_t)       // vk_scr
                     + (size_t)G * sizeof(typename WR::TempStorage); // wr_tmp
     }
 
