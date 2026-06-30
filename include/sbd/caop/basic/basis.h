@@ -204,18 +204,36 @@ namespace sbd {
 			    size_t bit_length,
 			    size_t total_bit_length) {
     if( get_extension(filename) == std::string("txt") ) {
-      std::ifstream ifs(filename);
-      if( !ifs.is_open() ) {
+      // Fast path: text is regular fixed-width records (total_bit_length chars of
+      // '0'/'1' + '\n').  Read the whole file in one shot and parse in-place.
+      std::ifstream ifs(filename, std::ios::binary);
+      if( !ifs.is_open() )
 	throw std::runtime_error("Failed to open basis bit-string file.");
-      }
-      std::string line;
-      std::vector<std::string> lines;
-      while( std::getline(ifs,line) ) {
-	lines.push_back(line);
-      }
-      config.resize(lines.size());
-      for(size_t i=0; i < lines.size(); i++) {
-	config[i] = from_string(lines[i],bit_length,total_bit_length);
+
+      ifs.seekg(0, std::ios::end);
+      const size_t file_size = ifs.tellg();
+      ifs.seekg(0, std::ios::beg);
+
+      const size_t record_size = total_bit_length + 1;  // L chars + '\n'
+      const size_t num_records = (file_size + 1) / record_size;
+      const size_t num_words   = (total_bit_length + bit_length - 1) / bit_length;
+
+      std::vector<char> buf(file_size);
+      ifs.read(buf.data(), file_size);
+      if( !ifs )
+	throw std::runtime_error("Failed to read basis bit-string file.");
+
+      config.resize(num_records);
+      for(size_t i = 0; i < num_records; i++) {
+	const char* rec = buf.data() + i * record_size;
+	config[i].resize(num_words);
+	std::fill(config[i].begin(), config[i].end(), size_t(0));
+	for(size_t j = 0; j < total_bit_length; j++) {
+	  if( rec[j] == '1' ) {
+	    size_t bit_idx = total_bit_length - 1 - j;
+	    config[i][bit_idx / bit_length] |= (size_t(1) << (bit_idx % bit_length));
+	  }
+	}
       }
     } else if ( get_extension(filename) == std::string("bin") ) {
       std::ifstream ifs(filename, std::ios::binary);
