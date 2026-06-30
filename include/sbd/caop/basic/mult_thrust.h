@@ -225,12 +225,18 @@ struct CaopMultKernel {
     }
 
     __device__ ElemT compute_contribution(const size_t* my_bra, int m) {
-        // No vk_scr scratch: cur_w is a register tracking this word's evolving state.
-        // The outer loop descends (w = elem_size-1 .. 0), so at word w all lower
-        // words w2 < w are still my_bra[w2] — never written.  n_occ_base accumulates
-        // their popcount once per word instead of once per op.
+        // n_occ_base starts as the full-bra popcount across all words.  At the
+        // top of each w iteration we subtract __popcll(cur_w) — which equals
+        // __popcll(my_bra[w]) before any ops touch cur_w — leaving the sum for
+        // words w2 < w, which is what the sign logic needs.
         int sign = 1;
         size_t lo = 0, hi = (size_t)n_kets;
+
+        int n_occ_base = 0;
+        if (sign_flag) {
+            for (int w2 = 0; w2 < elem_size; w2++)
+                n_occ_base += __popcll((unsigned long long)my_bra[w2]);
+        }
 
         for (int w = elem_size - 1; w >= 0; w--) {
             int wi       = elem_size - 1 - w;
@@ -240,13 +246,8 @@ struct CaopMultKernel {
 
             size_t cur_w = my_bra[w];  // register: evolves as ops are applied
 
-            // popcount of lower words — computed once per word, reused by all ops.
-            // For elem_size==1 (30-orbital common case) w==0 always, loop never runs.
-            int n_occ_base = 0;
-            if (sign_flag) {
-                for (int w2 = 0; w2 < w; w2++)
-                    n_occ_base += __popcll((unsigned long long)my_bra[w2]);
-            }
+            if (sign_flag)
+                n_occ_base -= __popcll((unsigned long long)cur_w);
 
             // creation ops
             for (int k = op_start, ke = op_start + n_dag_w; k < ke; k++) {
