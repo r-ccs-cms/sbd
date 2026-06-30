@@ -27,17 +27,19 @@ namespace sbd {
 // Tunable kernel parameters (override at compile time)
 // ============================================================
 #ifndef SBD_CAOP_MULT_BLOCK_SIZE
-  #define SBD_CAOP_MULT_BLOCK_SIZE 128
+  #define SBD_CAOP_MULT_BLOCK_SIZE 64
 #endif
 #ifndef SBD_CAOP_MULT_SUBWARP_SIZE
   #define SBD_CAOP_MULT_SUBWARP_SIZE 32
 #endif
 #ifndef SBD_CAOP_MULT_MIN_BLOCKS_PER_SM
-  #define SBD_CAOP_MULT_MIN_BLOCKS_PER_SM 4
+  #define SBD_CAOP_MULT_MIN_BLOCKS_PER_SM 32
 #endif
 
-static_assert(SBD_CAOP_MULT_BLOCK_SIZE % SBD_CAOP_MULT_SUBWARP_SIZE == 0,
-              "SBD_CAOP_MULT_BLOCK_SIZE must be a multiple of SBD_CAOP_MULT_SUBWARP_SIZE");
+static_assert(SBD_CAOP_MULT_BLOCK_SIZE % 32 == 0,
+              "SBD_CAOP_MULT_BLOCK_SIZE must be a multiple of 32 (full warp)");
+static_assert(32 % SBD_CAOP_MULT_SUBWARP_SIZE == 0,
+              "SBD_CAOP_MULT_SUBWARP_SIZE must divide 32 (must be 1, 2, 4, 8, 16, or 32)");
 
 // ============================================================
 // CaopBufferSlider<ElemT>: CPU-staging MPI slider for twk.
