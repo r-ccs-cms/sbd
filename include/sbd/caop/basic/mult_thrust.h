@@ -367,6 +367,12 @@ class CaopMultThrust {
     std::vector<int> slide_;
     MPI_Comm h_comm_, b_comm_, t_comm_;
 
+    // Persistent run() resources — allocated once on first run(), reused every Davidson iter.
+    thrust::device_vector<ElemT> d_twk_[2];
+    ElemT*          h_twk_[2];
+    cudaStream_t    compute_stream_, copy_stream_;
+    cudaEvent_t     copy_done_[2], compute_done_[2];
+
     // Compute tbs_seq via live MPI slides, upload to GPU.
     // Called once on the first run(); results cached in d_tbs_seq_ / n_kets_per_task_.
     void precompute_tbs_seq() {
@@ -402,7 +408,24 @@ class CaopMultThrust {
 public:
     CaopMultThrust() : tbs_initialized_(false), global_max_n_(0),
                        n_bras_(0), n_terms_(0), elem_size_(0),
-                       sign_(false), smem_bytes_(0) {}
+                       sign_(false), smem_bytes_(0),
+                       h_twk_{ nullptr, nullptr },
+                       compute_stream_(nullptr), copy_stream_(nullptr),
+                       copy_done_{ nullptr, nullptr },
+                       compute_done_{ nullptr, nullptr } {}
+
+    ~CaopMultThrust() {
+        if (h_twk_[0] != nullptr) {
+            cudaFreeHost(h_twk_[0]);
+            cudaFreeHost(h_twk_[1]);
+            cudaEventDestroy(copy_done_[0]);
+            cudaEventDestroy(copy_done_[1]);
+            cudaEventDestroy(compute_done_[0]);
+            cudaEventDestroy(compute_done_[1]);
+            cudaStreamDestroy(copy_stream_);
+            cudaStreamDestroy(compute_stream_);
+        }
+    }
 
     // Init: accepts pre-extracted GeneralOp data (m1/m2 as flat vectors,
     // terms as CaopRawTerm, c as coefficient vector). The friend mult()
@@ -533,9 +556,23 @@ public:
     void run(const std::vector<ElemT>& wk, std::vector<ElemT>& wb) {
         if (slide_.empty()) return;
 
-        // First call: compute tbs_seq via live MPI slides and cache on GPU.
-        // All subsequent calls use the cached d_tbs_seq_ directly.
+        // First call: allocate persistent buffers and compute tbs_seq.
+        // All subsequent calls reuse d_twk_/h_twk_/streams/events and d_tbs_seq_.
         if (!tbs_initialized_) {
+            d_twk_[0].resize(global_max_n_);
+            d_twk_[1].resize(global_max_n_);
+            cudaMallocHost(&h_twk_[0], global_max_n_ * sizeof(ElemT));
+            cudaMallocHost(&h_twk_[1], global_max_n_ * sizeof(ElemT));
+            cudaStreamCreateWithFlags(&compute_stream_, cudaStreamNonBlocking);
+            cudaStreamCreateWithFlags(&copy_stream_,    cudaStreamNonBlocking);
+            cudaEventCreateWithFlags(&copy_done_[0],    cudaEventDisableTiming);
+            cudaEventCreateWithFlags(&copy_done_[1],    cudaEventDisableTiming);
+            cudaEventCreateWithFlags(&compute_done_[0], cudaEventDisableTiming);
+            cudaEventCreateWithFlags(&compute_done_[1], cudaEventDisableTiming);
+            // Pre-signal both compute_done slots so the first copy_stream wait doesn't hang.
+            cudaEventRecord(compute_done_[0], 0);
+            cudaEventRecord(compute_done_[1], 0);
+            cudaDeviceSynchronize();
             precompute_tbs_seq();
             tbs_initialized_ = true;
         }
@@ -549,53 +586,32 @@ public:
         thrust::device_vector<ElemT> d_wb(wb.size());
         thrust::copy_n(wb.begin(), wb.size(), d_wb.begin());
 
-        // Initial slide of wk
-        std::vector<ElemT> twk_init;
+        // Initial slide of wk — when slide_[0]==0 (common case) use wk directly;
+        // no intermediate copy.
+        std::vector<ElemT> twk_init_buf;
+        const ElemT* twk0_data;
+        size_t twk0_size;
         if (slide_[0] != 0) {
-            MpiSlide(wk, twk_init, slide_[0], b_comm_);
+            MpiSlide(wk, twk_init_buf, slide_[0], b_comm_);
+            twk0_data = twk_init_buf.data();
+            twk0_size = twk_init_buf.size();
         } else {
-            twk_init = wk;
+            twk0_data = wk.data();
+            twk0_size = wk.size();
         }
 
-        // Use global_max_n_ from Init (no per-run Allreduce needed)
-        size_t gmax_ket = global_max_n_;
-
-        // Allocate double buffers
         int active_buf = 0, recv_buf = 1;
-        size_t twk_size[2] = { twk_init.size(), gmax_ket };
-
-        thrust::device_vector<ElemT> d_twk[2];
-        d_twk[0].resize(gmax_ket);
-        d_twk[1].resize(gmax_ket);
-
-        ElemT* h_twk[2] = { nullptr, nullptr };
-        cudaMallocHost(&h_twk[0], gmax_ket * sizeof(ElemT));
-        cudaMallocHost(&h_twk[1], gmax_ket * sizeof(ElemT));
-
-        // Create streams and events
-        cudaStream_t compute_stream, copy_stream;
-        cudaStreamCreateWithFlags(&compute_stream, cudaStreamNonBlocking);
-        cudaStreamCreateWithFlags(&copy_stream,    cudaStreamNonBlocking);
-        cudaEvent_t copy_done[2], compute_done[2];
-        cudaEventCreateWithFlags(&copy_done[0],    cudaEventDisableTiming);
-        cudaEventCreateWithFlags(&copy_done[1],    cudaEventDisableTiming);
-        cudaEventCreateWithFlags(&compute_done[0], cudaEventDisableTiming);
-        cudaEventCreateWithFlags(&compute_done[1], cudaEventDisableTiming);
-        // Mark both compute_done slots as completed so the first copy_stream wait
-        // on the unused recv_buf slot doesn't hang.
-        cudaEventRecord(compute_done[0], 0);
-        cudaEventRecord(compute_done[1], 0);
-        cudaDeviceSynchronize();
+        size_t twk_size[2] = { twk0_size, global_max_n_ };
 
         // Seed active buffer: CPU → pinned → GPU
-        if (!twk_init.empty())
-            std::memcpy(h_twk[active_buf], twk_init.data(), twk_size[active_buf] * sizeof(ElemT));
-        cudaMemcpyAsync(thrust::raw_pointer_cast(d_twk[active_buf].data()),
-                        h_twk[active_buf],
-                        twk_size[active_buf] * sizeof(ElemT),
-                        cudaMemcpyHostToDevice, copy_stream);
-        cudaEventRecord(copy_done[active_buf], copy_stream);
-        cudaEventRecord(copy_done[recv_buf],   copy_stream);
+        if (twk0_size > 0)
+            std::memcpy(h_twk_[active_buf], twk0_data, twk0_size * sizeof(ElemT));
+        cudaMemcpyAsync(thrust::raw_pointer_cast(d_twk_[active_buf].data()),
+                        h_twk_[active_buf],
+                        twk0_size * sizeof(ElemT),
+                        cudaMemcpyHostToDevice, copy_stream_);
+        cudaEventRecord(copy_done_[active_buf], copy_stream_);
+        cudaEventRecord(copy_done_[recv_buf],   copy_stream_);
 
         // Wb_init: scale + add diagonal (on compute_stream, after d_twk[active_buf] is ready)
         {
@@ -603,18 +619,18 @@ public:
             CaopWbInitKernel<ElemT> wbinit;
             wbinit.d_wb  = thrust::raw_pointer_cast(d_wb.data());
             wbinit.d_hd  = thrust::raw_pointer_cast(d_hd_.data());
-            wbinit.d_twk = thrust::raw_pointer_cast(d_twk[active_buf].data());
+            wbinit.d_twk = thrust::raw_pointer_cast(d_twk_[active_buf].data());
             wbinit.volp  = volp;
             wbinit.add_diag = (mpi_rank_t == 0);
             auto ci = thrust::counting_iterator<size_t>(0);
-            cudaStreamWaitEvent(compute_stream, copy_done[active_buf]);
-            thrust::for_each_n(thrust::cuda::par.on(compute_stream), ci, (size_t)n_bras_, wbinit);
+            cudaStreamWaitEvent(compute_stream_, copy_done_[active_buf]);
+            thrust::for_each_n(thrust::cuda::par.on(compute_stream_), ci, (size_t)n_bras_, wbinit);
         }
 
         CaopBufferSlider<ElemT> slider;
 
         for (size_t task = 0; task < slide_.size(); task++) {
-            cudaStreamWaitEvent(compute_stream, copy_done[active_buf]);
+            cudaStreamWaitEvent(compute_stream_, copy_done_[active_buf]);
 
             if (n_terms_ > 0) {
                 CaopMultKernel<ElemT> kernel;
@@ -623,7 +639,7 @@ public:
                 kernel.n_bras        = n_bras_;
                 kernel.elem_size     = elem_size_;
                 kernel.d_tbs         = thrust::raw_pointer_cast(d_tbs_seq_[task].data());
-                kernel.d_twk         = thrust::raw_pointer_cast(d_twk[active_buf].data());
+                kernel.d_twk         = thrust::raw_pointer_cast(d_twk_[active_buf].data());
                 kernel.n_kets        = (int)n_kets_per_task_[task];
                 kernel.d_m1          = thrust::raw_pointer_cast(d_m1_.data());
                 kernel.d_m2          = thrust::raw_pointer_cast(d_m2_.data());
@@ -633,39 +649,32 @@ public:
                 kernel.d_ndag_per_word = thrust::raw_pointer_cast(d_ndag_per_word_.data());
                 kernel.n_terms       = n_terms_;
                 kernel.sign_flag     = sign_;
-                launch_caop_mult((size_t)n_bras_, kernel, smem_bytes_, compute_stream);
+                launch_caop_mult((size_t)n_bras_, kernel, smem_bytes_, compute_stream_);
             }
 
-            cudaEventRecord(compute_done[active_buf], compute_stream);
+            cudaEventRecord(compute_done_[active_buf], compute_stream_);
 
             if (task + 1 < slide_.size()) {
                 int bslide = slide_[task] - slide_[task + 1];
-                cudaEventSynchronize(copy_done[recv_buf]);
+                cudaEventSynchronize(copy_done_[recv_buf]);
                 slider.ExchangeAsyncHost(
-                    h_twk[active_buf], twk_size[active_buf],
-                    h_twk[recv_buf],   gmax_ket,
+                    h_twk_[active_buf], twk_size[active_buf],
+                    h_twk_[recv_buf],   global_max_n_,
                     bslide, b_comm_, (int)task * 4);
                 if (slider.Sync()) {
                     twk_size[recv_buf] = slider.get_recv_size();
-                    cudaStreamWaitEvent(copy_stream, compute_done[recv_buf]);
-                    cudaMemcpyAsync(thrust::raw_pointer_cast(d_twk[recv_buf].data()),
-                                    h_twk[recv_buf],
+                    cudaStreamWaitEvent(copy_stream_, compute_done_[recv_buf]);
+                    cudaMemcpyAsync(thrust::raw_pointer_cast(d_twk_[recv_buf].data()),
+                                    h_twk_[recv_buf],
                                     twk_size[recv_buf] * sizeof(ElemT),
-                                    cudaMemcpyHostToDevice, copy_stream);
-                    cudaEventRecord(copy_done[recv_buf], copy_stream);
+                                    cudaMemcpyHostToDevice, copy_stream_);
+                    cudaEventRecord(copy_done_[recv_buf], copy_stream_);
                     std::swap(active_buf, recv_buf);
                 }
             } else {
-                cudaEventSynchronize(compute_done[active_buf]);
+                cudaEventSynchronize(compute_done_[active_buf]);
             }
         }
-
-        // Cleanup
-        cudaFreeHost(h_twk[0]); cudaFreeHost(h_twk[1]);
-        cudaEventDestroy(copy_done[0]);    cudaEventDestroy(copy_done[1]);
-        cudaEventDestroy(compute_done[0]); cudaEventDestroy(compute_done[1]);
-        cudaStreamDestroy(copy_stream);
-        cudaStreamDestroy(compute_stream);
 
         // Allreduce
         MpiAllreduce(d_wb, MPI_SUM, t_comm_);
