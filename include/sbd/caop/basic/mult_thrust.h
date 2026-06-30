@@ -230,7 +230,7 @@ struct CaopMultKernel {
         // __popcll(my_bra[w]) before any ops touch cur_w — leaving the sum for
         // words w2 < w, which is what the sign logic needs.
         int sign = 1;
-        size_t lo = 0, hi = (size_t)n_kets;
+        int lo = 0, hi = n_kets;
 
         int n_occ_base = 0;
         if (sign_flag) {
@@ -268,11 +268,13 @@ struct CaopMultKernel {
                 }
             }
 
+            int lo0 = lo;  // save before lower_bound narrows it
+
             // lower_bound for cur_w
             {
-                size_t L = lo, R = hi;
+                int L = lo, R = hi;
                 while (L < R) {
-                    size_t mid = L + (R - L) / 2;
+                    int mid = L + (R - L) / 2;
                     if (d_tbs[mid * elem_size + w] < cur_w) L = mid + 1;
                     else R = mid;
                 }
@@ -281,10 +283,10 @@ struct CaopMultKernel {
             if (lo >= hi || d_tbs[lo * elem_size + w] != cur_w) return ElemT(0);
 
             if (w > 0) {
-                // upper_bound
-                size_t L = lo, R = hi;
+                // upper_bound — start from lo0 (same as lower_bound) for uniform access
+                int L = lo0, R = hi;
                 while (L < R) {
-                    size_t mid = L + (R - L) / 2;
+                    int mid = L + (R - L) / 2;
                     if (d_tbs[mid * elem_size + w] <= cur_w) L = mid + 1;
                     else R = mid;
                 }
