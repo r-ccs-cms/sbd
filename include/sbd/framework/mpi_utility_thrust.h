@@ -43,7 +43,6 @@ template <typename ElemT>
 void MpiAllreduce(thrust::device_vector<ElemT> &A, MPI_Op op, MPI_Comm comm)
 {
     SBD_NVTX_RANGE_COLOR("MpiAllreduce", __LINE__);
-    std::cout << "   TEST MpiAllreduce" << std::endl;
     MPI_Datatype DataT = GetMpiType<ElemT>::MpiT;
 #if 1
     thrust::device_vector<ElemT> B(A);

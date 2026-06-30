@@ -504,7 +504,7 @@ public:
                 for (int i = 0; i < n_fops; i++)
                     for (int j = i + 1; j < n_fops; j++)
                         if (perm[i] > perm[j]) inv++;
-                coeff_host[m] = c[m] * ((inv & 1) ? ElemT(-1) : ElemT(1));
+                coeff_host[m] = c[m] * ((sign && (inv & 1)) ? ElemT(-1) : ElemT(1));
 
                 // Fill word_start and ndag_per_word
                 int cur_wi   = 0;
