@@ -14,13 +14,14 @@
 
 namespace sbd {
   
-  void redistribution(std::vector<std::vector<size_t>> & config,
+  template <typename Container>
+  void redistribution(Container & config,
 		      size_t bit_length,
 		      size_t total_bit_length,
 		      MPI_Comm comm) {
     int mpi_size; MPI_Comm_size(comm,&mpi_size);
-    std::vector<std::vector<size_t>> config_begin(mpi_size);
-    std::vector<std::vector<size_t>> config_end(mpi_size);
+    Container config_begin(mpi_size);
+    Container config_end(mpi_size);
     std::vector<size_t> index_begin(mpi_size);
     std::vector<size_t> index_end(mpi_size);
     mpi_redistribution(config,config_begin,config_end,index_begin,index_end,
@@ -30,35 +31,13 @@ namespace sbd {
   
 
 
-  // Sort a[lo..hi) in less_from_back order by recursing one element at a time.
-  // Each comparison level touches exactly one size_t (no inner loop, no .size()
-  // call); for clen==1 this is a single std::sort with a bare size_t comparison.
-  void sort_from_back(std::vector<std::vector<size_t>>& a,
-                      size_t lo, size_t hi, int elem) {
-    if (hi - lo <= 1 || elem < 0) return;
-    std::sort(a.begin() + lo, a.begin() + hi,
-              [elem](const std::vector<size_t>& x,
-                     const std::vector<size_t>& y) {
-                return x[elem] < y[elem];
-              });
-    if (elem == 0) return;
-    size_t run_lo = lo;
-    for (size_t i = lo + 1; i <= hi; i++) {
-      if (i == hi || a[i][elem] != a[run_lo][elem]) {
-        if (i - run_lo > 1)
-          sort_from_back(a, run_lo, i, elem - 1);
-        run_lo = i;
-      }
-    }
-  }
-
   // Sort idx[lo..hi) so that (a[idx[i]][elem] & Mask) is in ascending order,
   // recursing on equal-valued runs through decreasing elements.
   // Mask is a template parameter so the compiler specialises each instantiation:
   // Mask=~0 eliminates the AND entirely; Mask=0x5555... is baked into code.
-  template<size_t Mask = ~size_t(0)>
+  template<size_t Mask = ~size_t(0), typename Container>
   void idx_sort_from_back(std::vector<size_t>& idx,
-                          const std::vector<std::vector<size_t>>& a,
+                          const Container& a,
                           size_t lo, size_t hi, int elem) {
     if (hi - lo <= 1 || elem < 0) return;
     std::sort(idx.begin() + lo, idx.begin() + hi,
@@ -80,7 +59,7 @@ namespace sbd {
   // contiguous range of alpha strings, giving equal bra_a across ranks.
   // Alpha occupation is at even bit positions (0,2,4,...) of the det bitstring,
   // interleaved with beta at odd positions.  Works for any clen.
-  void redistribution_equal_bra_a(std::vector<std::vector<size_t>> & config,
+  void redistribution_equal_bra_a(det_vector<size_t> & config,
                                    size_t bit_length,
                                    size_t total_bit_length,
                                    MPI_Comm comm) {
@@ -99,13 +78,13 @@ namespace sbd {
     std::iota(idx.begin(), idx.end(), size_t(0));
     idx_sort_from_back<ALPHA_MASK>(idx, config, 0, idx.size(), clen - 1);
     {
-      std::vector<std::vector<size_t>> tmp(config.size());
-      for (size_t i = 0; i < config.size(); i++) tmp[i] = std::move(config[idx[i]]);
+      det_vector<size_t> tmp(config.size());
+      for (size_t i = 0; i < config.size(); i++) tmp[i] = config[idx[i]];
       config = std::move(tmp);
     }
 
     // Step 2: collect local unique alpha keys from sorted config (mask on the fly).
-    std::vector<std::vector<size_t>> local_alphas;
+    det_vector<size_t> local_alphas;
     {
       std::vector<size_t> prev(clen, ~size_t(0));
       for (size_t j = 0; j < config.size(); j++) {
@@ -137,12 +116,10 @@ namespace sbd {
       for (int k = 0; k < clen; k++) flat_local[i * clen + k] = local_alphas[i][k];
     MPI_Allgatherv(flat_local.data(), local_n * clen, SBD_MPI_SIZE_T,
                    flat_all.data(), ag_counts_w.data(), ag_displs_w.data(), SBD_MPI_SIZE_T, comm);
-    std::vector<std::vector<size_t>> all_alphas(total_n, std::vector<size_t>(clen));
+    det_vector<size_t> all_alphas(static_cast<size_t>(total_n));
     for (int i = 0; i < total_n; i++)
       for (int k = 0; k < clen; k++) all_alphas[i][k] = flat_all[i * clen + k];
-    std::sort(all_alphas.begin(), all_alphas.end(),
-      [](const auto& a, const auto& b) { return less_from_back(a, b); });
-    all_alphas.erase(std::unique(all_alphas.begin(), all_alphas.end()), all_alphas.end());
+    sort_bitarray(all_alphas);
     size_t global_bra_a = all_alphas.size();
 
     // Step 4: assign alpha strings to ranks with equal bra_a.
@@ -159,7 +136,7 @@ namespace sbd {
     for (size_t j = 0; j < config.size(); j++) {
       size_t pos = static_cast<size_t>(
         std::lower_bound(all_alphas.begin(), all_alphas.end(), config[j],
-          [clen](const std::vector<size_t>& alpha, const std::vector<size_t>& det) {
+          [clen](const auto& alpha, const auto& det) {
             constexpr size_t ALPHA_MASK = 0x5555555555555555ULL;
             for (int k = clen - 1; k >= 0; k--) {
               if (alpha[k] < (det[k] & ALPHA_MASK)) return true;
@@ -200,19 +177,20 @@ namespace sbd {
 
     // Step 7: unpack and restore kernel sort order (beta-primary = less_from_back).
     size_t n_recv = static_cast<size_t>(total_recv_w) / static_cast<size_t>(clen);
-    config.resize(n_recv, std::vector<size_t>(clen));
+    config.resize(n_recv);
     for (size_t i = 0; i < n_recv; i++)
       for (int k = 0; k < clen; k++) config[i][k] = recvbuf[i * clen + k];
-    sort_from_back(config, 0, config.size(), clen - 1);
+    sort_bitarray(config);
   }
 
-  void reordering(std::vector<std::vector<size_t>> & config,
+  template <typename Container>
+  void reordering(Container & config,
 		  size_t bit_length,
 		  size_t total_bit_length,
 		  MPI_Comm comm) {
     int mpi_size; MPI_Comm_size(comm,&mpi_size);
-    std::vector<std::vector<size_t>> config_begin(mpi_size);
-    std::vector<std::vector<size_t>> config_end(mpi_size);
+    Container config_begin(mpi_size);
+    Container config_end(mpi_size);
     std::vector<size_t> index_begin(mpi_size);
     std::vector<size_t> index_end(mpi_size);
     mpi_sort_bitarray(config,config_begin,config_end,index_begin,index_end,
@@ -220,8 +198,9 @@ namespace sbd {
   }
   
   // I/O for basis
+  template<typename Container>
   void load_basis_from_file(const std::string & filename,
-			    std::vector<std::vector<size_t>> & config,
+			    Container & config,
 			    size_t bit_length,
 			    size_t total_bit_length) {
     if( get_extension(filename) == std::string("txt") ) {
@@ -268,8 +247,9 @@ namespace sbd {
     }
   }
   
+  template<typename Container>
   void save_basis_to_file(const std::string & filename,
-			  std::vector<std::vector<size_t>> & config,
+			  Container & config,
 			  size_t bit_length,
 			  size_t total_bit_length) {
     if( get_extension(filename) == std::string("txt") ) {
@@ -299,8 +279,9 @@ namespace sbd {
     return filename;
   }
 
+  template<typename Container>
   void load_basis_from_files(const std::vector<std::string> & all_filenames,
-			     std::vector<std::vector<size_t>> & config,
+			     Container & config,
 			     size_t bit_length,
 			     size_t total_bit_length,
 			     MPI_Comm comm) {
@@ -329,7 +310,7 @@ namespace sbd {
     for (int i = my_first; i < my_last; ++i) {
       const std::string & fname = all_filenames[i];
       
-      std::vector<std::vector<size_t>> local;
+      Container local;
       load_basis_from_file(fname, local, bit_length, total_bit_length);
       
       config.insert(config.end(),

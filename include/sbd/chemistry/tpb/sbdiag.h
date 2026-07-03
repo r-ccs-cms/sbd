@@ -31,6 +31,7 @@ namespace sbd {
       double eps = 1.0e-4;
       double max_time = 86400.0;
       int init = 0;
+      size_t seed = 1729;
       int do_shuffle = 0;
       int do_rdm = 0;
       int carryover_type = 0;
@@ -62,6 +63,12 @@ namespace sbd {
 	}
 	if( std::string(argv[i]) == "--method" ) {
 	  sbd_data.method = std::atoi(argv[++i]);
+	}
+	if( std::string(argv[i]) == "--init" ) {
+	  sbd_data.init = std::atoi(argv[++i]);
+	}
+	if( std::string(argv[i]) == "--seed" ) {
+	  sbd_data.seed = std::atoi(argv[++i]);
 	}
 	if( std::string(argv[i]) == "--iteration" ) {
 	  sbd_data.max_it = std::atoi(argv[++i]);
@@ -164,6 +171,7 @@ namespace sbd {
       double eps = sbd_data.eps;
       double max_time = sbd_data.max_time;
       int init = sbd_data.init;
+      size_t seed = sbd_data.seed;
       int do_shuffle = sbd_data.do_shuffle;
       int do_rdm = sbd_data.do_rdm;
       double ratio = sbd_data.ratio;
@@ -180,6 +188,8 @@ namespace sbd {
       sbd::SetupIntegrals(fcidump,L,N,I0,I1,I2);
 
       int norbs = L;
+      sbd::det_vector<size_t>::init_elem_size((2*norbs + bit_length - 1) / bit_length);
+      sbd::det_vector<size_t, sbd::det_kind::half>::init_elem_size((norbs + bit_length - 1) / bit_length);
 
 #ifdef USE_OMP_OFFLOAD
       // check orbital count and determinant size : there are limits in omp_offload.h
@@ -275,7 +285,7 @@ namespace sbd {
       auto time_start_init = std::chrono::high_resolution_clock::now();
       std::vector<double> W;
       if( loadname == std::string("") ) {
-	sbd::BasisInitVector(W,adet,bdet,adet_comm_size,bdet_comm_size,h_comm,b_comm,t_comm,init);
+	sbd::BasisInitVector(W,adet,bdet,adet_comm_size,bdet_comm_size,h_comm,b_comm,t_comm,init,seed);
       } else {
 	sbd::LoadWavefunction(loadname,adet,bdet,
 			      adet_comm_size,bdet_comm_size,
@@ -511,7 +521,7 @@ namespace sbd {
 	}
 
 	auto time_start_davidson = std::chrono::high_resolution_clock::now();
-	sbd::BasisInitVector(W,adet,bdet,adet_comm_size,bdet_comm_size,h_comm,b_comm,t_comm,init);
+	sbd::BasisInitVector(W,adet,bdet,adet_comm_size,bdet_comm_size,h_comm,b_comm,t_comm,init,seed);
 #ifdef SBD_THRUST
 	if( method == 1 ) {
 		sbd::Davidson(hii, W, device_mult,
@@ -824,8 +834,8 @@ namespace sbd {
 	bdet = adet;
       } else if ( do_shuffle == 1 ) {
 	if( mpi_rank == 0 ) {
-	  unsigned int seed = static_cast<unsigned int>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
-	  sbd::ShuffleDet(adet,seed);
+	  unsigned int seeda = static_cast<unsigned int>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+	  sbd::ShuffleDet(adet,seeda);
 	}
 	sbd::MpiBcast(adet,0,comm);
 	bdet = adet;

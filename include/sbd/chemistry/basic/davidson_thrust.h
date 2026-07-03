@@ -39,10 +39,13 @@ struct Determine_kernel {
     }
     __host__ __device__ void operator()(int is)
     {
-        if (std::abs(e0 - dii[is]) > eps_reg) {
-            C[is] = R[is] / (e0 - dii[is]);
+        // Use squared comparison to avoid std::abs(complex) which calls hypot
+        // (not translatable to device code by nvc++).
+        auto denom = e0 - dii[is];
+        if (SquaredNorm(denom) > eps_reg * eps_reg) {
+            C[is] = R[is] / denom;
         } else {
-            C[is] = R[is] / (e0 - dii[is] - eps_reg);
+            C[is] = R[is] / (denom - eps_reg);
         }
     }
 };

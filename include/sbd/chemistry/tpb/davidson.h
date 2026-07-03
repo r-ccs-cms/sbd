@@ -57,7 +57,8 @@ x = 0    1    2    3
 		       MPI_Comm h_comm,
 		       MPI_Comm b_comm,
 		       MPI_Comm t_comm,
-		       int init) {
+		       int init,
+		       size_t seed) {
     int mpi_rank_h; MPI_Comm_rank(h_comm,&mpi_rank_h);
     int mpi_size_h; MPI_Comm_size(h_comm,&mpi_size_h);
     int mpi_rank_b; MPI_Comm_rank(b_comm,&mpi_rank_b);
@@ -79,7 +80,7 @@ x = 0    1    2    3
       MpiBcast(W,0,t_comm);
     } else if ( init == 1 ) {
       if( mpi_rank_t == 0 ) {
-	Randomize(W,b_comm,h_comm);
+	Randomize(W,b_comm,h_comm,seed);
       }
       MpiBcast(W,0,t_comm);
     }
@@ -109,7 +110,8 @@ x = 0    1    2    3
 		       MPI_Comm h_comm,
 		       MPI_Comm b_comm,
 		       MPI_Comm t_comm,
-		       int init) {
+		       int init,
+		       size_t seed) {
 
     int mpi_rank_h; MPI_Comm_rank(h_comm,&mpi_rank_h);
     int mpi_size_h; MPI_Comm_size(h_comm,&mpi_size_h);
@@ -135,7 +137,7 @@ x = 0    1    2    3
       }
     } else if ( init == 1 ) {
       if( mpi_rank_t == 0 ) {
-	Randomize(W,b_comm,h_comm);
+	Randomize(W,b_comm,h_comm,seed);
       }
       MpiBcast(W,0,t_comm);
     }

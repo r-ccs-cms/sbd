@@ -8,8 +8,8 @@
 namespace sbd {
   namespace gdb {
 
-    template <typename ElemT>
-    void makeQCham(const std::vector<std::vector<size_t>> & det,
+    template <typename ElemT, typename DetsContainer>
+    void makeQCham(const DetsContainer & det,
 		   size_t bit_length,
 		   size_t norb,
 		   const DetIndexMap & idxmap,
@@ -37,7 +37,7 @@ namespace sbd {
       int mpi_rank_t; MPI_Comm_rank(t_comm,&mpi_rank_t);
 
       DetIndexMap tidxmap;
-      std::vector<std::vector<size_t>> tdet;
+      DetsContainer tdet;
 
       if( exidx[0].slide != 0 ) {
 	sbd::gdb::MpiSlide(idxmap,tidxmap,-exidx[0].slide,b_comm);
@@ -364,7 +364,7 @@ namespace sbd {
 
 	if( task != exidx.size()-1 ) {
 	  int shift = exidx[task].slide-exidx[task+1].slide;
-	  std::vector<std::vector<size_t>> rdet;
+	  DetsContainer rdet;
 	  DetIndexMap ridxmap;
 	  std::swap(rdet,tdet);
 	  DetIndexMapCopy(tidxmap,ridxmap);
@@ -376,8 +376,8 @@ namespace sbd {
     }
 
 
-    template <typename ElemT>
-    void makeQChamDiagTerms(const std::vector<std::vector<size_t>> & det,
+    template <typename ElemT, typename DetsContainer>
+    void makeQChamDiagTerms(const DetsContainer & det,
 			    size_t bit_length,
 			    size_t norb,
 			    const DetIndexMap & idxmap,

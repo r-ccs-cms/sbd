@@ -48,8 +48,7 @@ namespace sbd {
     for(size_t ia=adet_start; ia < adet_end; ia++) {
       D[ia] = 0.0;
       for(size_t ib=bdet_start; ib < bdet_end; ib++) {
-	D[ia] += GetReal(Conjugate(W[(ia-adet_start)*bdet_range+ib-bdet_start])
-			 *W[(ia-adet_start)*bdet_range+ib-bdet_start]);
+	D[ia] += SquaredNorm(W[(ia-adet_start)*bdet_range+ib-bdet_start]);
       }
     }
     
@@ -175,8 +174,7 @@ namespace sbd {
     for(size_t ib=bdet_start; ib < bdet_end; ib++) {
       D[ib] = 0.0;
       for(size_t ia=adet_start; ia < adet_end; ia++) {
-	D[ib] += GetReal(Conjugate(W[(ia-adet_start)*bdet_range+ib-bdet_start])
-			 *W[(ia-adet_start)*bdet_range+ib-bdet_start]);
+	D[ib] += SquaredNorm(W[(ia-adet_start)*bdet_range+ib-bdet_start]);
       }
     }
     

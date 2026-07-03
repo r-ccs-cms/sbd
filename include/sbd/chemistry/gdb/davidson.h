@@ -8,13 +8,14 @@
 namespace sbd {
   namespace gdb {
     
-    template <typename ElemT>
+    template <typename ElemT, typename DetsContainer>
     void BasisInitVector(std::vector<ElemT> & w,
-			 const std::vector<std::vector<size_t>> & det,
+			 const DetsContainer & det,
 			 MPI_Comm h_comm,
 			 MPI_Comm b_comm,
 			 MPI_Comm t_comm,
-			 int init) {
+			 int init,
+			 size_t seed) {
       int mpi_size_h; MPI_Comm_size(h_comm,&mpi_size_h);
       int mpi_rank_h; MPI_Comm_rank(h_comm,&mpi_rank_h);
       int mpi_size_b; MPI_Comm_size(b_comm,&mpi_size_b);
@@ -30,7 +31,7 @@ namespace sbd {
 	MpiBcast(w,0,t_comm);
       } else if ( init == 1 ) {
 	if( mpi_rank_t == 0 ) {
-	  Randomize(w,b_comm,h_comm);
+	  Randomize(w,b_comm,h_comm,seed);
 	}
 	MpiBcast(w,0,t_comm);
       }
@@ -312,10 +313,10 @@ namespace sbd {
       
     }
     
-    template <typename ElemT, typename RealT>
+    template <typename ElemT, typename RealT, typename DetsContainer>
     void Davidson(const std::vector<ElemT> & hii,
 		  std::vector<ElemT> & w,
-		  const std::vector<std::vector<size_t>> & det,
+		  const DetsContainer & det,
 		  const size_t bit_length,
 		  const size_t norb,
 		  const DetIndexMap & idxmap,
