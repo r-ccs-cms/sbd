@@ -7,7 +7,7 @@
 
 
 #include "sbd/framework/mpi_utility_thrust.h"
-#include <cassert>
+#include <stdexcept>
 
 // SUBWARP threading for MultAlphaBetaKernel (track gh-A).
 // SBD_GDB_SUBWARP_SIZE selects the threading granularity:
@@ -309,7 +309,9 @@ public:
 
     void set_mpi_size(size_t h_rank, size_t h_size)
     {
-        assert(h_rank == 0 && h_size == 1);
+        if (h_rank != 0 || h_size != 1)
+            throw std::runtime_error(
+                "GDB Thrust mult does not support h_comm_size > 1: ntasks must equal b_comm_size * t_comm_size");
     }
 };
 
