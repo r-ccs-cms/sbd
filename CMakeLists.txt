@@ -38,6 +38,7 @@ option(SBD_COMPLEX                     "Use complex<double> element type (-D_COM
 # cross-compile mode (compiler check is skipped). PE_ENV=NVIDIA is the
 # reliable signal; CMAKE_CXX_COMPILER matches nvc++ for standalone builds.
 if(CMAKE_CXX_COMPILER MATCHES "nvc[+][+]" OR "$ENV{PE_ENV}" STREQUAL "NVIDIA")
+  set(SBD_USING_NVHPC TRUE)
   add_compile_options(
     "--diag_suppress=declared_but_not_referenced,set_but_not_used,cuda_compile"
   )
@@ -99,6 +100,13 @@ function(sbd_configure_diag target)
     target_compile_definitions(${target} PRIVATE SBD_TRADMODE USE_OMP_OFFLOAD)
     target_compile_options(${target} PRIVATE -mp=gpu "-gpu=${SBD_GPU_ARCH}")
     target_link_options(${target}   PRIVATE -mp=gpu "-gpu=${SBD_GPU_ARCH}")
+    # nvc++ requires -cuda to expose __ffsll in host context; __builtin_ffsl is
+    # a GCC intrinsic absent from nvc++.  AMD offload uses its own builtins.
+    if(SBD_USING_NVHPC)
+      target_compile_definitions(${target} PRIVATE "__builtin_ffsl=__ffsll")
+      target_compile_options(${target} PRIVATE -cuda)
+      target_link_options(${target}   PRIVATE -cuda)
+    endif()
   endif()
 endfunction()
 
