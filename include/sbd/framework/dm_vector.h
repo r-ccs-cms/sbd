@@ -9,6 +9,7 @@
 
 #define SBD_MAX_THREADS 192
 
+#include <chrono>
 #include <random>
 
 namespace sbd {
@@ -111,6 +112,17 @@ namespace sbd {
     return (double)(h >> 11) * (2.0 / 9007199254740992.0) - 1.0;
   }
 
+// Time+rank seed for the seed==0 case.  Uses MPI_COMM_WORLD rank so ranks
+// that share the same b_comm rank (e.g. rank 0 on different nodes) still
+// diverge.  No broadcast: random initialisation needs no cross-rank agreement.
+  static inline size_t sbd_time_seed() {
+    auto ns = static_cast<size_t>(
+      std::chrono::high_resolution_clock::now().time_since_epoch().count());
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    return static_cast<size_t>(sbd_elem_hash(ns, static_cast<size_t>(rank)));
+  }
+
   template <typename ElemT>
   void apply_dist_seeded(ElemT & x, size_t seed, size_t idx) {
     x = ElemT(sbd_hash_to_uniform(sbd_elem_hash(seed, idx)));
@@ -123,10 +135,11 @@ namespace sbd {
   }
 
   template <typename ElemT>
-  void Randomize(std::vector<ElemT> & X,
+  void Randomize(size_t seed,
+		 std::vector<ElemT> & X,
 		 MPI_Comm b_comm,
-		 MPI_Comm h_comm,
-		 size_t seed) {
+		 MPI_Comm h_comm) {
+    if (seed == 0) seed = sbd_time_seed();
     using RealT = typename GetRealType<ElemT>::RealT;
     int mpi_size_h; MPI_Comm_size(h_comm,&mpi_size_h);
     int mpi_size_b; MPI_Comm_size(b_comm,&mpi_size_b);
@@ -178,9 +191,10 @@ namespace sbd {
   }
 
   template <typename ElemT>
-  void Randomize(std::vector<ElemT> & X,
-		 MPI_Comm b_comm,
-		 size_t seed) {
+  void Randomize(size_t seed,
+		 std::vector<ElemT> & X,
+		 MPI_Comm b_comm) {
+    if (seed == 0) seed = sbd_time_seed();
     using RealT = typename GetRealType<ElemT>::RealT;
     int mpi_size_b; MPI_Comm_size(b_comm,&mpi_size_b);
     int nth = omp_get_max_threads();
@@ -225,7 +239,24 @@ namespace sbd {
       X[is] *= factor;
     }
   }
-  
+
+// Unseeded wrappers: pass seed=0, which the seeded implementations replace
+// with a local time+rank seed.  The first argument is std::vector so
+// these can never match the seeded overloads by accident (std::vector cannot
+// implicitly convert to size_t).
+  template <typename ElemT>
+  void Randomize(std::vector<ElemT> & X,
+		 MPI_Comm b_comm,
+		 MPI_Comm h_comm) {
+    Randomize(size_t(0), X, b_comm, h_comm);
+  }
+
+  template <typename ElemT>
+  void Randomize(std::vector<ElemT> & X,
+		 MPI_Comm b_comm) {
+    Randomize(size_t(0), X, b_comm);
+  }
+
   template <typename ElemT>
   void Swap(ElemT a, std::vector<ElemT> & X,
 	    ElemT b, std::vector<ElemT> & Y) {

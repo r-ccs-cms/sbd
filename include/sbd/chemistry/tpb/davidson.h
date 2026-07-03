@@ -80,7 +80,7 @@ x = 0    1    2    3
       MpiBcast(W,0,t_comm);
     } else if ( init == 1 ) {
       if( mpi_rank_t == 0 ) {
-	Randomize(W,b_comm,h_comm,seed);
+	Randomize(seed,W,b_comm,h_comm);
       }
       MpiBcast(W,0,t_comm);
     }
@@ -137,7 +137,7 @@ x = 0    1    2    3
       }
     } else if ( init == 1 ) {
       if( mpi_rank_t == 0 ) {
-	Randomize(W,b_comm,h_comm,seed);
+	Randomize(seed,W,b_comm,h_comm);
       }
       MpiBcast(W,0,t_comm);
     }

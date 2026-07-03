@@ -31,7 +31,7 @@ namespace sbd {
 	MpiBcast(w,0,t_comm);
       } else if ( init == 1 ) {
 	if( mpi_rank_t == 0 ) {
-	  Randomize(w,b_comm,h_comm,seed);
+	  Randomize(seed,w,b_comm,h_comm);
 	}
 	MpiBcast(w,0,t_comm);
       }
