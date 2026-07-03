@@ -42,23 +42,52 @@ struct AX_kernel {
 };
 
 
-// dot product
-template <typename ElemT>
-struct dot_product_kernel {
-    ElemT* A;
-    ElemT* B;
+// Binary element-wise kernel: applies f(X[i], Y[i]) for use with
+// precise_reduce_sum_with_function.  The return type is deduced from F.
+template <typename ElemT, typename F>
+struct binary_kernel {
+    const ElemT* X;
+    const ElemT* Y;
+    F f;
 
-    dot_product_kernel(const thrust::device_vector<ElemT>& a, const thrust::device_vector<ElemT>& b)
-    {
-        A = (ElemT*)thrust::raw_pointer_cast(a.data());
-        B = (ElemT*)thrust::raw_pointer_cast(b.data());
-    }
+    binary_kernel(const thrust::device_vector<ElemT>& x,
+                  const thrust::device_vector<ElemT>& y,
+                  F f_in)
+        : X(thrust::raw_pointer_cast(x.data()))
+        , Y(thrust::raw_pointer_cast(y.data()))
+        , f(f_in)
+    {}
 
-    __host__ __device__ ElemT operator()(const size_t i) const
+    __host__ __device__ auto operator()(const size_t i) const
     {
-        return A[i] * B[i];
+        return f(X[i], Y[i]);
     }
 };
+
+template <typename ElemT, typename F>
+binary_kernel<ElemT, F> make_binary_kernel(const thrust::device_vector<ElemT>& x,
+                                            const thrust::device_vector<ElemT>& y,
+                                            F f)
+{
+    return binary_kernel<ElemT, F>(x, y, f);
+}
+
+// squared-norm kernel: returns |A[i]|^2 as double (works for real and complex)
+template <typename ElemT>
+struct norm_kernel {
+    ElemT* A;
+
+    norm_kernel(const thrust::device_vector<ElemT>& a)
+    {
+        A = (ElemT*)thrust::raw_pointer_cast(a.data());
+    }
+
+    __host__ __device__ double operator()(const size_t i) const
+    {
+        return SquaredNorm(A[i]);
+    }
+};
+
 
 template <typename ElemT, typename RealT>
 void Normalize(thrust::device_vector<ElemT>& X,
@@ -83,7 +112,7 @@ void Normalize(thrust::device_vector<ElemT>& X,
     */
 
 #ifndef SBD_USE_CUBLAS
-    auto kernel = dot_product_kernel<RealT>(X, X);
+    auto kernel = norm_kernel<ElemT>(X);
     res = precise_reduce_sum_with_function(kernel, X.size());
     if (comm_size > 1) {
         SBD_NVTX_RANGE_COLOR("MPI_Allreduce", 0);
@@ -210,16 +239,17 @@ void Normalize2(thrust::device_vector<ElemT>& X0,
 }
 #endif
 
-template <typename ElemT, typename RealT>
+template <typename ElemT>
 void InnerProduct(const thrust::device_vector<ElemT>& X,
                   const thrust::device_vector<ElemT>& Y,
-                  RealT& res,
+                  ElemT& res,
                   MPI_Comm comm)
 {
+    using RealT = typename GetRealType<ElemT>::RealT;
     SBD_NVTX_RANGE_COLOR("InnerProduct", __LINE__);
 
-    res = 0.0;
-    RealT sum = 0.0;
+    res = ElemT(0);
+    ElemT sum = ElemT(0);
 
     /*
     // If CUDA native kernel can not be used, use host code
@@ -231,14 +261,38 @@ void InnerProduct(const thrust::device_vector<ElemT>& X,
     */
 
 #ifndef SBD_USE_CUBLAS
-    auto kernel = dot_product_kernel<RealT>(X, Y);
-    sum = precise_reduce_sum_with_function(kernel, X.size());
+    if constexpr (std::is_floating_point_v<ElemT>) {
+        sum = precise_reduce_sum_with_function(
+            make_binary_kernel(X, Y,
+                [] __host__ __device__ (const ElemT& x, const ElemT& y) { return x * y; }),
+            X.size());
+    } else {
+        // conj(X)*Y = (xr*yr + xi*yi) + (xr*yi - xi*yr)*i
+        // Each component reduced independently (Kahan over one product/element).
+        double sum_rr = precise_reduce_sum_with_function(
+            make_binary_kernel(X, Y,
+                [] __host__ __device__ (const ElemT& x, const ElemT& y) { return x.real() * y.real(); }),
+            X.size());
+        double sum_ii = precise_reduce_sum_with_function(
+            make_binary_kernel(X, Y,
+                [] __host__ __device__ (const ElemT& x, const ElemT& y) { return x.imag() * y.imag(); }),
+            X.size());
+        double sum_ri = precise_reduce_sum_with_function(
+            make_binary_kernel(X, Y,
+                [] __host__ __device__ (const ElemT& x, const ElemT& y) { return x.real() * y.imag(); }),
+            X.size());
+        double sum_ir = precise_reduce_sum_with_function(
+            make_binary_kernel(X, Y,
+                [] __host__ __device__ (const ElemT& x, const ElemT& y) { return x.imag() * y.real(); }),
+            X.size());
+        sum = ElemT(sum_rr + sum_ii, sum_ri - sum_ir);
+    }
 #else
     sum = sbd::Dot(X, Y);
 #endif
     {
         SBD_NVTX_RANGE_COLOR("MPI_Allreduce", 0);
-        MPI_Datatype DataT = GetMpiType<RealT>::MpiT;
+        MPI_Datatype DataT = GetMpiType<ElemT>::MpiT;
         MPI_Allreduce(&sum, &res, 1, DataT, MPI_SUM, comm);
     }
 }

@@ -26,19 +26,19 @@ namespace sbd {
     for(int i=0; i < num_closed; i++) {
       int oi = closed.at(i)/2;
       int si = closed.at(i)%2;
-      onebody[si][oi+norb*oi] += Conjugate(WeightI)*WeightI;
+      onebody[si][oi+norb*oi] += SquaredNorm(WeightI);
       for(int j=i+1; j < num_closed; j++) {
 	int oj = closed.at(j)/2;
 	int sj = closed.at(j)%2;
 	twobody[si+2*sj][oi+norb*oj+norb*norb*oi+norb*norb*norb*oj]
-	  += Conjugate(WeightI) * WeightI;
+	  += SquaredNorm(WeightI);
 	twobody[sj+2*si][oj+norb*oi+norb*norb*oj+norb*norb*norb*oi]
-	  += Conjugate(WeightI) * WeightI;
+	  += SquaredNorm(WeightI);
 	if( si == sj ) {
 	  twobody[si+2*sj][oi+norb*oj+norb*norb*oj+norb*norb*norb*oi]
-	    += -Conjugate(WeightI) * WeightI;
+	    += -SquaredNorm(WeightI);
 	  twobody[sj+2*si][oj+norb*oi+norb*norb*oi+norb*norb*norb*oj]
-	    += -Conjugate(WeightI) * WeightI;
+	    += -SquaredNorm(WeightI);
 	}
       }
     }
@@ -71,19 +71,19 @@ namespace sbd {
       int oi = closed[i]/2;
       int si = closed[i]%2;
 #pragma omp atomic update
-      oneBody[si*norb2 + oi + norb*oi] += Conjugate(WeightI)*WeightI;
+      oneBody[si*norb2 + oi + norb*oi] += SquaredNorm(WeightI);
       for(int j=i+1; j < num_closed; j++) {
         int oj = closed[j]/2;
         int sj = closed[j]%2;
 #pragma omp atomic update
-        twoBody[(si+2*sj)*norb4 + oi+norb*oj+norb*norb*oi+norb*norb*norb*oj] += Conjugate(WeightI) * WeightI;
+        twoBody[(si+2*sj)*norb4 + oi+norb*oj+norb*norb*oi+norb*norb*norb*oj] += SquaredNorm(WeightI);
 #pragma omp atomic update
-        twoBody[(sj+2*si)*norb4 + oj+norb*oi+norb*norb*oj+norb*norb*norb*oi] += Conjugate(WeightI) * WeightI;
+        twoBody[(sj+2*si)*norb4 + oj+norb*oi+norb*norb*oj+norb*norb*norb*oi] += SquaredNorm(WeightI);
         if( si == sj ) {
 #pragma omp atomic update
-          twoBody[(si+2*sj)*norb4 + oi+norb*oj+norb*norb*oj+norb*norb*norb*oi] += -Conjugate(WeightI) * WeightI;
+          twoBody[(si+2*sj)*norb4 + oi+norb*oj+norb*norb*oj+norb*norb*norb*oi] += -SquaredNorm(WeightI);
 #pragma omp atomic update
-          twoBody[(sj+2*si)*norb4 + oj+norb*oi+norb*norb*oi+norb*norb*norb*oj] += -Conjugate(WeightI) * WeightI;
+          twoBody[(sj+2*si)*norb4 + oj+norb*oi+norb*norb*oi+norb*norb*norb*oj] += -SquaredNorm(WeightI);
         }
       }
     }

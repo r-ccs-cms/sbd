@@ -207,7 +207,7 @@ namespace sbd {
 		  << " sbd: start integral construction" << std::endl;
       }
       auto time_start_model = std::chrono::high_resolution_clock::now();
-      double I0;
+      ElemT I0;
       sbd::oneInt<ElemT> I1;
       sbd::twoInt<ElemT> I2;
       sbd::SetupIntegrals(fcidump,L,N,I0,I1,I2);
@@ -280,7 +280,7 @@ namespace sbd {
       */
 #ifdef SBD_THRUST
 	// multiplyer class for TPB on Thrust
-	MultGDBThrust<double> device_mult;
+	MultGDBThrust<ElemT> device_mult;
 #endif
       if( method == 0 ) {
 
@@ -353,10 +353,10 @@ namespace sbd {
 	auto time_start_mult = std::chrono::high_resolution_clock::now();
 #ifdef SBD_THRUST
     // copyin W
-    thrust::device_vector<double> w_dev(w.size());
+    thrust::device_vector<ElemT> w_dev(w.size());
     thrust::copy_n(w.begin(), w.size(), w_dev.begin());
 
-    thrust::device_vector<double> v(w.size(), 0.0);
+    thrust::device_vector<ElemT> v(w.size(), ElemT(0.0));
 
 	device_mult.run(hii, w_dev, v);
 

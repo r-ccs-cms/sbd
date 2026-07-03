@@ -66,7 +66,7 @@ namespace sbd {
       RealT val, tmp;
       #pragma omp for schedule(static)
       for(size_t is=0; is < X.size(); is++) {
-        val = GetReal( Conjugate(X[is]) * X[is] ) - eps;
+        val = SquaredNorm(X[is]) - eps;
         tmp = mysum + val;
         eps = (tmp - mysum) - val;
         mysum = tmp;
@@ -149,7 +149,7 @@ namespace sbd {
       #pragma omp for schedule(static)
       for(size_t is=0; is < X.size(); is++) {
         apply_dist_seeded(X[is], seed, (size_t)global_offset + is);
-        val = GetReal( Conjugate(X[is]) * X[is] ) - eps;
+        val = SquaredNorm(X[is]) - eps;
         tmp = mysum + val;
         eps = (tmp - mysum) - val;
         mysum = tmp;
@@ -202,7 +202,7 @@ namespace sbd {
       #pragma omp for schedule(static)
       for(size_t is=0; is < X.size(); is++) {
         apply_dist_seeded(X[is], seed, (size_t)global_offset + is);
-        val = GetReal( Conjugate(X[is]) * X[is] ) - eps;
+        val = SquaredNorm(X[is]) - eps;
         tmp = mysum + val;
         eps = (tmp - mysum) - val;
         mysum = tmp;

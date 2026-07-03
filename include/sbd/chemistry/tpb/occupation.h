@@ -76,8 +76,8 @@ namespace sbd {
 	for(size_t ib = ib_start; ib < ib_end; ib++) {
 	  size_t idx = (ia-ia_start) * ib_size + (ib-ib_start);
 	  for(size_t io=0; io < oIdx.size(); io++) {
-	    local_res[2*io]   += Conjugate(W[idx]) * W[idx] * daop[io][ia-ia_start];
-	    local_res[2*io+1] += Conjugate(W[idx]) * W[idx] * dbop[io][ib-ib_start];
+	    local_res[2*io]   += SquaredNorm(W[idx]) * daop[io][ia-ia_start];
+	    local_res[2*io+1] += SquaredNorm(W[idx]) * dbop[io][ib-ib_start];
 	  }
 	}
       }

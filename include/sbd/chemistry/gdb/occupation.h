@@ -24,10 +24,10 @@ namespace sbd {
 	size_t thread_id = omp_get_thread_num();
 	size_t i_begin = thread_id;
 	size_t i_end   = det.size();
-	std::vector<double> local_res(2*oidx.size(),ElemT(0.0));
+	std::vector<double> local_res(2*oidx.size(),0.0);
 	for(size_t i=i_begin; i < i_end; i+=num_threads) {
 	  for(size_t io=0; io < oidx.size(); io++) {
-	    double weight = GetReal(Conjugate(w[i]) * w[i]);
+	    double weight = SquaredNorm(w[i]);
 	    if( getocc(det[i],bit_length,2*oidx[io]) ) {
 	      local_res[2*io] += weight;
 	    }
