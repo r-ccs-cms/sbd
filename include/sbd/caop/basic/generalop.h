@@ -288,6 +288,7 @@ namespace sbd {
 
     size_t size() const { return fops_.size(); }
     int n_dag() const { return n_dag_; }
+    const CAOp& FOp(size_t i) const { return fops_[i]; }
     
     void dagger()
     {

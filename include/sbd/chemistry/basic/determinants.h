@@ -166,7 +166,8 @@ namespace sbd {
   }
 
   //
-  inline bool getocc(const std::vector<size_t> & det,
+  template<typename DetT>
+  inline bool getocc(const DetT & det,
 		     const size_t bit_length, int x) {
     size_t index = x / bit_length;
     size_t bit_pos = x % bit_length;
@@ -362,8 +363,9 @@ namespace sbd {
   }
 
 
-  int difference(const std::vector<size_t> & a,
-		 const std::vector<size_t> & b,
+  template<typename RowA, typename RowB>
+  int difference(const RowA & a,
+		 const RowB & b,
 		 size_t bit_length,
 		 size_t L) {
     int count = 0;
@@ -385,8 +387,9 @@ namespace sbd {
     return count;
   }
 
-  void OrbitalDifference(const std::vector<size_t> & a,
-			 const std::vector<size_t> & b,
+  template<typename RowA, typename RowB>
+  void OrbitalDifference(const RowA & a,
+			 const RowB & b,
 			 size_t bit_length,
 			 size_t L,
 			 std::vector<int> & x,

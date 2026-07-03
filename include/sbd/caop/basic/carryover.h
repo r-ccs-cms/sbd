@@ -29,7 +29,7 @@ namespace sbd {
     std::vector<RealT> r(w.size());
 #pragma omp parallel for
     for(size_t i=0; i < w.size(); i++) {
-      r[i] = GetReal(Conjugate(w[i])*w[i]);
+      r[i] = SquaredNorm(w[i]);
     }
     std::vector<size_t> ranking(r.size());
     mpi_find_ranking(r,ranking,b_comm);

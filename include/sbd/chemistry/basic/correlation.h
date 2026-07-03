@@ -26,19 +26,24 @@ namespace sbd {
     for(int i=0; i < num_closed; i++) {
       int oi = closed.at(i)/2;
       int si = closed.at(i)%2;
-      onebody[si][oi+norb*oi] += Conjugate(WeightI)*WeightI;
+#pragma omp atomic update
+      onebody[si][oi+norb*oi] += SquaredNorm(WeightI);
       for(int j=i+1; j < num_closed; j++) {
 	int oj = closed.at(j)/2;
 	int sj = closed.at(j)%2;
-	twobody[si+2*sj][oi+norb*oj+norb*norb*oi+norb*norb*norb*oj]
-	  += Conjugate(WeightI) * WeightI;
+#pragma omp atomic update
 	twobody[sj+2*si][oj+norb*oi+norb*norb*oj+norb*norb*norb*oi]
-	  += Conjugate(WeightI) * WeightI;
+	  += SquaredNorm(WeightI);
+#pragma omp atomic update
+	twobody[sj+2*si][oj+norb*oi+norb*norb*oj+norb*norb*norb*oi]
+	  += SquaredNorm(WeightI);
 	if( si == sj ) {
+#pragma omp atomic update
 	  twobody[si+2*sj][oi+norb*oj+norb*norb*oj+norb*norb*norb*oi]
-	    += -Conjugate(WeightI) * WeightI;
+	    += -SquaredNorm(WeightI);
+#pragma omp atomic update
 	  twobody[sj+2*si][oj+norb*oi+norb*norb*oi+norb*norb*norb*oj]
-	    += -Conjugate(WeightI) * WeightI;
+	    += -SquaredNorm(WeightI);
 	}
       }
     }
@@ -71,19 +76,19 @@ namespace sbd {
       int oi = closed[i]/2;
       int si = closed[i]%2;
 #pragma omp atomic update
-      oneBody[si*norb2 + oi + norb*oi] += Conjugate(WeightI)*WeightI;
+      oneBody[si*norb2 + oi + norb*oi] += SquaredNorm(WeightI);
       for(int j=i+1; j < num_closed; j++) {
         int oj = closed[j]/2;
         int sj = closed[j]%2;
 #pragma omp atomic update
-        twoBody[(si+2*sj)*norb4 + oi+norb*oj+norb*norb*oi+norb*norb*norb*oj] += Conjugate(WeightI) * WeightI;
+        twoBody[(si+2*sj)*norb4 + oi+norb*oj+norb*norb*oi+norb*norb*norb*oj] += SquaredNorm(WeightI);
 #pragma omp atomic update
-        twoBody[(sj+2*si)*norb4 + oj+norb*oi+norb*norb*oj+norb*norb*norb*oi] += Conjugate(WeightI) * WeightI;
+        twoBody[(sj+2*si)*norb4 + oj+norb*oi+norb*norb*oj+norb*norb*norb*oi] += SquaredNorm(WeightI);
         if( si == sj ) {
 #pragma omp atomic update
-          twoBody[(si+2*sj)*norb4 + oi+norb*oj+norb*norb*oj+norb*norb*norb*oi] += -Conjugate(WeightI) * WeightI;
+          twoBody[(si+2*sj)*norb4 + oi+norb*oj+norb*norb*oj+norb*norb*norb*oi] += -SquaredNorm(WeightI);
 #pragma omp atomic update
-          twoBody[(sj+2*si)*norb4 + oj+norb*oi+norb*norb*oi+norb*norb*norb*oj] += -Conjugate(WeightI) * WeightI;
+          twoBody[(sj+2*si)*norb4 + oj+norb*oi+norb*norb*oi+norb*norb*norb*oj] += -SquaredNorm(WeightI);
         }
       }
     }
@@ -110,6 +115,7 @@ namespace sbd {
     int si = i % 2;
     int oa = a / 2;
     int sa = a % 2;
+#pragma omp atomic update
     onebody[si][oi+norb*oa] += Conjugate(WeightI) * WeightJ * ElemT(sgn);
     size_t one = 1;
     for(int x=0; x < DetI.size(); x++) {
@@ -120,14 +126,18 @@ namespace sbd {
 	int oj = soj / 2;
 	int sj = soj % 2;
 
+#pragma omp atomic update
 	twobody[si+2*sj][oa+oj*norb+oi*norb*norb+oj*norb*norb*norb] += Conjugate(WeightI) * WeightJ * ElemT(sgn);
+#pragma omp atomic update
 	twobody[sj+2*si][oj+oa*norb+oj*norb*norb+oi*norb*norb*norb] += Conjugate(WeightI) * WeightJ * ElemT(sgn);
-	
+
 	if( si == sj ) {
+#pragma omp atomic update
 	  twobody[si+2*sj][oa+oj*norb+oj*norb*norb+oi*norb*norb*norb] += Conjugate(WeightI) * WeightJ * ElemT(-sgn);
+#pragma omp atomic update
 	  twobody[sj+2*si][oj+oa*norb+oi*norb*norb+oj*norb*norb*norb] += Conjugate(WeightI) * WeightJ * ElemT(-sgn);
 	}
-	
+
 	bits &= ~(one << (pos-1));
       }
     }
@@ -217,12 +227,16 @@ namespace sbd {
     int sb = B % 2;
 
     if( si == sa ) {
+#pragma omp atomic update
       twobody[si+2*sj][oa+norb*ob+norb*norb*(oi+norb*oj)] += ElemT(sgn) * Conjugate(WeightI) * WeightJ;
+#pragma omp atomic update
       twobody[sj+2*si][ob+norb*oa+norb*norb*(oj+norb*oi)] += ElemT(sgn) * Conjugate(WeightI) * WeightJ;
     }
 
     if( si == sb ) {
+#pragma omp atomic update
       twobody[si+2*sj][oa+norb*ob+norb*norb*(oj+norb*oi)] += ElemT(-sgn) * Conjugate(WeightI) * WeightJ;
+#pragma omp atomic update
       twobody[sj+2*si][ob+norb*oa+norb*norb*(oi+norb*oj)] += ElemT(-sgn) * Conjugate(WeightI) * WeightJ;
     }
 

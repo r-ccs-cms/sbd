@@ -7,6 +7,8 @@
 
 #include "sbd/framework/type_def.h"
 #include "sbd/framework/mpi_utility.h"
+#include <stdexcept>
+#include <string>
 
 namespace sbd
 {
@@ -51,21 +53,25 @@ public:
         const size_t n_adet = idxmap.AdetToDetLen.size();
         const size_t n_bdet = idxmap.BdetToDetLen.size();
 
-        assert(n_adet <= UINT32_MAX);
-        assert(n_bdet <= UINT32_MAX);
+        if (n_adet > UINT32_MAX)
+            throw std::overflow_error("GDB Thrust: n_adet (" + std::to_string(n_adet) + ") exceeds uint32_t range");
+        if (n_bdet > UINT32_MAX)
+            throw std::overflow_error("GDB Thrust: n_bdet (" + std::to_string(n_bdet) + ") exceeds uint32_t range");
 
         std::vector<uint32_t> offset_adet(n_adet + 1);
         std::vector<uint32_t> offset_bdet(n_bdet + 1);
         for (size_t i = 0; i < n_adet; i++) {
             offset_adet[i] = size_adet;
-            assert(idxmap.AdetToDetLen[i] <= UINT32_MAX - (size_t)size_adet);
+            if (idxmap.AdetToDetLen[i] > UINT32_MAX - (size_t)size_adet)
+                throw std::overflow_error("GDB Thrust: AdetToDet offset overflows uint32_t");
             size_adet += static_cast<uint32_t>(idxmap.AdetToDetLen[i]);
         }
         offset_adet[n_adet] = size_adet;
 
         for (size_t i = 0; i < n_bdet; i++) {
             offset_bdet[i] = size_bdet;
-            assert(idxmap.BdetToDetLen[i] <= UINT32_MAX - (size_t)size_bdet);
+            if (idxmap.BdetToDetLen[i] > UINT32_MAX - (size_t)size_bdet)
+                throw std::overflow_error("GDB Thrust: BdetToDet offset overflows uint32_t");
             size_bdet += static_cast<uint32_t>(idxmap.BdetToDetLen[i]);
         }
         offset_bdet[n_bdet] = size_bdet;
@@ -103,7 +109,8 @@ public:
         const size_t sm_size = (size_t)size_adet * 2 + (size_t)size_bdet * 2;
         std::vector<uint32_t> sm_buf(sm_size);
         for (size_t i = 0; i < sm_size; i++) {
-            assert(idxmap.storage[i] <= UINT32_MAX);
+            if (idxmap.storage[i] > UINT32_MAX)
+                throw std::overflow_error("GDB Thrust: idxmap SM value overflows uint32_t");
             sm_buf[i] = static_cast<uint32_t>(idxmap.storage[i]);
         }
         thrust::copy_n(sm_buf.begin(), sm_buf.size(), storage.begin() + count);
@@ -235,7 +242,8 @@ public:
         std::vector<uint32_t> offset_self_adet(exidx.SelfFromAdetLen.size() + 1);
         for(size_t i=0; i < exidx.SelfFromAdetLen.size(); i++) {
             offset_self_adet[i] = size_self_adet;
-            assert(exidx.SelfFromAdetLen[i] <= UINT32_MAX - (size_t)size_self_adet);
+            if (exidx.SelfFromAdetLen[i] > UINT32_MAX - (size_t)size_self_adet)
+                throw std::overflow_error("GDB Thrust: SelfFromAdet offset overflows uint32_t");
             size_self_adet += static_cast<uint32_t>(exidx.SelfFromAdetLen[i]);
             size++;
         }
@@ -245,7 +253,8 @@ public:
         std::vector<uint32_t> offset_self_bdet(exidx.SelfFromBdetLen.size() + 1);
         for(size_t i=0; i < exidx.SelfFromBdetLen.size(); i++) {
             offset_self_bdet[i] = size_self_bdet;
-            assert(exidx.SelfFromBdetLen[i] <= UINT32_MAX - (size_t)size_self_bdet);
+            if (exidx.SelfFromBdetLen[i] > UINT32_MAX - (size_t)size_self_bdet)
+                throw std::overflow_error("GDB Thrust: SelfFromBdet offset overflows uint32_t");
             size_self_bdet += static_cast<uint32_t>(exidx.SelfFromBdetLen[i]);
             size++;
         }
@@ -255,7 +264,8 @@ public:
         std::vector<uint32_t> offset_single_adet(exidx.SinglesFromAdetLen.size() + 1);
         for(size_t i=0; i < exidx.SinglesFromAdetLen.size(); i++) {
             offset_single_adet[i] = size_single_adet;
-            assert(exidx.SinglesFromAdetLen[i] <= UINT32_MAX - (size_t)size_single_adet);
+            if (exidx.SinglesFromAdetLen[i] > UINT32_MAX - (size_t)size_single_adet)
+                throw std::overflow_error("GDB Thrust: SinglesFromAdet offset overflows uint32_t");
             size_single_adet += static_cast<uint32_t>(exidx.SinglesFromAdetLen[i]);
             size++;
         }
@@ -265,7 +275,8 @@ public:
         std::vector<uint32_t> offset_double_adet(exidx.DoublesFromAdetLen.size() + 1);
         for(size_t i=0; i < exidx.DoublesFromAdetLen.size(); i++) {
             offset_double_adet[i] = size_double_adet;
-            assert(exidx.DoublesFromAdetLen[i] <= UINT32_MAX - (size_t)size_double_adet);
+            if (exidx.DoublesFromAdetLen[i] > UINT32_MAX - (size_t)size_double_adet)
+                throw std::overflow_error("GDB Thrust: DoublesFromAdet offset overflows uint32_t");
             size_double_adet += static_cast<uint32_t>(exidx.DoublesFromAdetLen[i]);
             size++;
         }
@@ -275,7 +286,8 @@ public:
         std::vector<uint32_t> offset_single_bdet(exidx.SinglesFromBdetLen.size() + 1);
         for(size_t i=0; i < exidx.SinglesFromBdetLen.size(); i++) {
             offset_single_bdet[i] = size_single_bdet;
-            assert(exidx.SinglesFromBdetLen[i] <= UINT32_MAX - (size_t)size_single_bdet);
+            if (exidx.SinglesFromBdetLen[i] > UINT32_MAX - (size_t)size_single_bdet)
+                throw std::overflow_error("GDB Thrust: SinglesFromBdet offset overflows uint32_t");
             size_single_bdet += static_cast<uint32_t>(exidx.SinglesFromBdetLen[i]);
             size++;
         }
@@ -285,7 +297,8 @@ public:
         std::vector<uint32_t> offset_double_bdet(exidx.DoublesFromBdetLen.size() + 1);
         for(size_t i=0; i < exidx.DoublesFromBdetLen.size(); i++) {
             offset_double_bdet[i] = size_double_bdet;
-            assert(exidx.DoublesFromBdetLen[i] <= UINT32_MAX - (size_t)size_double_bdet);
+            if (exidx.DoublesFromBdetLen[i] > UINT32_MAX - (size_t)size_double_bdet)
+                throw std::overflow_error("GDB Thrust: DoublesFromBdet offset overflows uint32_t");
             size_double_bdet += static_cast<uint32_t>(exidx.DoublesFromBdetLen[i]);
             size++;
         }
@@ -325,7 +338,8 @@ public:
         size_t sm_count = size - count;
         std::vector<uint32_t> sm_buf(sm_count);
         for (size_t i = 0; i < sm_count; i++) {
-            assert(exidx.storage[i] <= UINT32_MAX);
+            if (exidx.storage[i] > UINT32_MAX)
+                throw std::overflow_error("GDB Thrust: exidx SM value overflows uint32_t");
             sm_buf[i] = static_cast<uint32_t>(exidx.storage[i]);
         }
         thrust::copy_n(sm_buf.begin(), sm_count, storage.begin() + count);

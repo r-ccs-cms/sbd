@@ -17,12 +17,12 @@ namespace sbd {
     std::string tag = oss.str();
     std::string filename = statename + tag + ".bin";
     return filename;
-    
+
   }
 
-  template <typename ElemT>
+  template <typename ElemT, typename DetsContainer>
   void SaveWavefunction(const std::string savename,
-			const std::vector<std::vector<size_t>> & basis,
+			const DetsContainer & basis,
 			MPI_Comm h_comm,
 			MPI_Comm b_comm,
 			MPI_Comm t_comm,
@@ -34,15 +34,13 @@ namespace sbd {
 
     size_t basis_size = basis.size();
     size_t basis_length = basis[0].size();
-    std::vector<size_t> tbs(basis_length);
     if( mpi_rank_h == 0 && mpi_rank_t == 0 ) {
       std::string filename = statefilename(savename,mpi_rank_b);
       std::ofstream ofs(filename,std::ios::binary);
       ofs.write(reinterpret_cast<char *>(&basis_size),sizeof(size_t));
       ofs.write(reinterpret_cast<char *>(&basis_length),sizeof(size_t));
       for(size_t i=0; i < basis_size; i++) {
-	tbs = basis[i];
-	ofs.write(reinterpret_cast<char *>(tbs.data()),sizeof(size_t)*basis_length);
+	ofs.write(reinterpret_cast<const char *>(basis[i].data()),sizeof(size_t)*basis_length);
       }
       auto rw = w;
       ofs.write(reinterpret_cast<char *>(rw.data()),sizeof(ElemT)*basis_size);
@@ -50,14 +48,14 @@ namespace sbd {
     }
   }
 
-  template <typename ElemT>
+  template <typename ElemT, typename DetsContainer>
   void LoadWavefunction(const std::string loadname,
-			const std::vector<std::vector<size_t>> & basis,
+			const DetsContainer & basis,
 			MPI_Comm h_comm,
 			MPI_Comm b_comm,
 			MPI_Comm t_comm,
 			std::vector<ElemT> & w) {
-    
+
     int mpi_rank_h; MPI_Comm_rank(h_comm,&mpi_rank_h);
     int mpi_rank_t; MPI_Comm_rank(t_comm,&mpi_rank_t);
     int mpi_size_t; MPI_Comm_size(t_comm,&mpi_size_t);
@@ -69,9 +67,9 @@ namespace sbd {
     if( mpi_rank_h == 0 ) {
 
       if( mpi_rank_t == 0 ) {
-	size_t load_basis_size;
-	size_t load_basis_length;
-	std::vector<std::vector<size_t>> load_basis;
+	size_t load_basis_size   = 0;
+	size_t load_basis_length = 0;
+	det_vector<size_t> load_basis;
 	std::vector<ElemT> load_w;
 	std::string filename = statefilename(loadname,mpi_rank_b);
 	std::ifstream ifs(filename,std::ios::binary);
@@ -87,22 +85,13 @@ namespace sbd {
 	  ifs.read(reinterpret_cast<char *>(load_w.data()),sizeof(ElemT)*load_basis_size);
 	}
 
-	// we use slide and find method
+	auto cmp = [](const auto & x, const auto & y) {
+	  return sbd::less_from_back(x,y);
+	};
 	std::vector<size_t> index_not_found;
 	index_not_found.reserve(load_basis_size);
 	for(size_t i=0; i < load_basis_size; i++) {
-	  /*
-	  auto itn = std::lower_bound(basis.begin(),basis.end(),load_basis[i],
-				      [](const std::vector<size_t> & x,
-					 const std::vector<size_t> & y) {
-					return x < y;
-				      });
-	  */
-	  auto itn = std::lower_bound(basis.begin(),basis.end(),load_basis[i],
-				      [](const std::vector<size_t> & x,
-					 const std::vector<size_t> & y) {
-					return sbd::less_from_back(x,y);
-				      });
+	  auto itn = std::lower_bound(basis.begin(),basis.end(),load_basis[i],cmp);
 	  if( itn == basis.end() || *itn != load_basis[i] ) {
 	    index_not_found.push_back(i);
 	  } else {
@@ -110,31 +99,20 @@ namespace sbd {
 	    w[n] = load_w[i];
 	  }
 	}
-	std::vector<std::vector<size_t>> send_basis(index_not_found.size());
+	det_vector<size_t> send_basis(index_not_found.size());
 	std::vector<ElemT> send_w(index_not_found.size());
 	for(size_t k=0; k < index_not_found.size(); k++) {
 	  send_basis[k] = load_basis[index_not_found[k]];
 	  send_w[k] = load_w[index_not_found[k]];
 	}
-	
+
 	for(int slide=1; slide < mpi_size_b; slide++) {
 	  MpiSlide(send_basis,load_basis,1,b_comm);
 	  MpiSlide(send_w,load_w,1,b_comm);
 	  index_not_found.resize(0);
 	  index_not_found.reserve(load_basis.size());
 	  for(size_t i=0; i < load_basis.size(); i++) {
-	    /*
-	    auto itn = std::lower_bound(basis.begin(),basis.end(),load_basis[i],
-					[](const std::vector<size_t> & x,
-					   const std::vector<size_t> & y) {
-					  return x < y;
-					});
-	    */
-	    auto itn = std::lower_bound(basis.begin(),basis.end(),load_basis[i],
-					[](const std::vector<size_t> & x,
-					   const std::vector<size_t> & y) {
-					  return sbd::less_from_back(x,y);
-					});
+	    auto itn = std::lower_bound(basis.begin(),basis.end(),load_basis[i],cmp);
 	    if( itn == basis.end() || *itn != load_basis[i] ) {
 	      index_not_found.push_back(i);
 	    } else {
@@ -156,8 +134,8 @@ namespace sbd {
     }
     MpiBcast(w,0,h_comm);
   }
-  
-  
+
+
 }
 
 #endif

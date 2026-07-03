@@ -6,6 +6,8 @@
 #ifndef SBD_CHEMISTRY_BASIC_CORRELATION_THRUST_H
 #define SBD_CHEMISTRY_BASIC_CORRELATION_THRUST_H
 
+#include "sbd/framework/cuda_utility.h"
+
 namespace sbd
 {
 
@@ -42,16 +44,16 @@ public:
             if (this->getocc(det, i)) {
                 int oi = i / 2;
                 int si = i % 2;
-                atomicAdd(onebody + si * onebody_size + oi + this->norbs * oi, Conjugate(WeightI) * WeightI);
+                sbd::atomic_add_real(onebody + si * onebody_size + oi + this->norbs * oi, SquaredNorm(WeightI));
                 for (int j = i + 1; j < 2 * this->norbs; j++) {
                     if (this->getocc(det, j)) {
                         int oj = j / 2;
                         int sj = j % 2;
-                        atomicAdd(twobody + (si + 2 * sj) * twobody_size + (oi + this->norbs * oj + this->norbs * this->norbs * oi + this->norbs * this->norbs * this->norbs * oj), Conjugate(WeightI) * WeightI);
-                        atomicAdd(twobody + (sj + 2 * si) * twobody_size + (oj + this->norbs * oi + this->norbs * this->norbs * oj + this->norbs * this->norbs * this->norbs * oi), Conjugate(WeightI) * WeightI);
+                        sbd::atomic_add_real(twobody + (si + 2 * sj) * twobody_size + (oi + this->norbs * oj + this->norbs * this->norbs * oi + this->norbs * this->norbs * this->norbs * oj), SquaredNorm(WeightI));
+                        sbd::atomic_add_real(twobody + (sj + 2 * si) * twobody_size + (oj + this->norbs * oi + this->norbs * this->norbs * oj + this->norbs * this->norbs * this->norbs * oi), SquaredNorm(WeightI));
                         if (si == sj) {
-                            atomicAdd(twobody + (si + 2 * sj) * twobody_size + (oi + this->norbs * oj + this->norbs * this->norbs * oj + this->norbs * this->norbs * this->norbs * oi), -Conjugate(WeightI) * WeightI);
-                            atomicAdd(twobody + (sj + 2 * si) * twobody_size + (oj + this->norbs * oi + this->norbs * this->norbs * oi + this->norbs * this->norbs * this->norbs * oj), -Conjugate(WeightI) * WeightI);
+                            sbd::atomic_add_real(twobody + (si + 2 * sj) * twobody_size + (oi + this->norbs * oj + this->norbs * this->norbs * oj + this->norbs * this->norbs * this->norbs * oi), -SquaredNorm(WeightI));
+                            sbd::atomic_add_real(twobody + (sj + 2 * si) * twobody_size + (oj + this->norbs * oi + this->norbs * this->norbs * oi + this->norbs * this->norbs * this->norbs * oj), -SquaredNorm(WeightI));
                         }
                     }
                 }
@@ -74,7 +76,7 @@ public:
         int si = i % 2;
         int oa = a / 2;
         int sa = a % 2;
-        atomicAdd(onebody + si * onebody_size + (oi + this->norbs * oa), Conjugate(WeightI) * WeightJ * ElemT(sgn));
+        sbd::atomic_add(onebody + si * onebody_size + (oi + this->norbs * oa), Conjugate(WeightI) * WeightJ * ElemT(sgn));
         size_t one = 1;
         for (int x = 0; x < this->D_size; x++) {
             size_t bits = det[x];
@@ -84,12 +86,12 @@ public:
                     int oj = soj / 2;
                     int sj = soj % 2;
 
-                    atomicAdd(twobody + (si + 2 * sj) * twobody_size + (oa + oj * this->norbs + oi * this->norbs * this->norbs + oj * this->norbs * this->norbs * this->norbs), Conjugate(WeightI) * WeightJ * ElemT(sgn));
-                    atomicAdd(twobody + (sj + 2 * si) * twobody_size + (oj + oa * this->norbs + oj * this->norbs * this->norbs + oi * this->norbs * this->norbs * this->norbs), Conjugate(WeightI) * WeightJ * ElemT(sgn));
+                    sbd::atomic_add(twobody + (si + 2 * sj) * twobody_size + (oa + oj * this->norbs + oi * this->norbs * this->norbs + oj * this->norbs * this->norbs * this->norbs), Conjugate(WeightI) * WeightJ * ElemT(sgn));
+                    sbd::atomic_add(twobody + (sj + 2 * si) * twobody_size + (oj + oa * this->norbs + oj * this->norbs * this->norbs + oi * this->norbs * this->norbs * this->norbs), Conjugate(WeightI) * WeightJ * ElemT(sgn));
 
                     if (si == sj) {
-                        atomicAdd(twobody + (si + 2 * sj) * twobody_size + (oa + oj * this->norbs + oj * this->norbs * this->norbs + oi * this->norbs * this->norbs * this->norbs), Conjugate(WeightI) * WeightJ * ElemT(-sgn));
-                        atomicAdd(twobody + (sj + 2 * si) * twobody_size + (oj + oa * this->norbs + oi * this->norbs * this->norbs + oj * this->norbs * this->norbs * this->norbs), Conjugate(WeightI) * WeightJ * ElemT(-sgn));
+                        sbd::atomic_add(twobody + (si + 2 * sj) * twobody_size + (oa + oj * this->norbs + oj * this->norbs * this->norbs + oi * this->norbs * this->norbs * this->norbs), Conjugate(WeightI) * WeightJ * ElemT(-sgn));
+                        sbd::atomic_add(twobody + (sj + 2 * si) * twobody_size + (oj + oa * this->norbs + oi * this->norbs * this->norbs + oj * this->norbs * this->norbs * this->norbs), Conjugate(WeightI) * WeightJ * ElemT(-sgn));
                     }
                 }
                 bits >>= 1;
@@ -127,13 +129,13 @@ public:
         int sb = B % 2;
 
         if (si == sa) {
-            atomicAdd(twobody + (si + 2 * sj) * twobody_size + (oa + this->norbs * ob + this->norbs * this->norbs * (oi + this->norbs * oj)), ElemT(sgn) * Conjugate(WeightI) * WeightJ);
-            atomicAdd(twobody + (sj + 2 * si) * twobody_size + (ob + this->norbs * oa + this->norbs * this->norbs * (oj + this->norbs * oi)), ElemT(sgn) * Conjugate(WeightI) * WeightJ);
+            sbd::atomic_add(twobody + (si + 2 * sj) * twobody_size + (oa + this->norbs * ob + this->norbs * this->norbs * (oi + this->norbs * oj)), ElemT(sgn) * Conjugate(WeightI) * WeightJ);
+            sbd::atomic_add(twobody + (sj + 2 * si) * twobody_size + (ob + this->norbs * oa + this->norbs * this->norbs * (oj + this->norbs * oi)), ElemT(sgn) * Conjugate(WeightI) * WeightJ);
         }
 
         if (si == sb) {
-            atomicAdd(twobody + (si + 2 * sj) * twobody_size + (oa + this->norbs * ob + this->norbs * this->norbs * (oj + this->norbs * oi)), ElemT(-sgn) * Conjugate(WeightI) * WeightJ);
-            atomicAdd(twobody + (sj + 2 * si) * twobody_size + (ob + this->norbs * oa + this->norbs * this->norbs * (oi + this->norbs * oj)), ElemT(-sgn) * Conjugate(WeightI) * WeightJ);
+            sbd::atomic_add(twobody + (si + 2 * sj) * twobody_size + (oa + this->norbs * ob + this->norbs * this->norbs * (oj + this->norbs * oi)), ElemT(-sgn) * Conjugate(WeightI) * WeightJ);
+            sbd::atomic_add(twobody + (sj + 2 * si) * twobody_size + (ob + this->norbs * oa + this->norbs * this->norbs * (oi + this->norbs * oj)), ElemT(-sgn) * Conjugate(WeightI) * WeightJ);
         }
     }
 };

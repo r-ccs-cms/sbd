@@ -8,10 +8,10 @@
 namespace sbd {
   namespace gdb {
 
-    template <typename ElemT>
+    template <typename ElemT, typename DetsContainer>
     void OccupationDensity(const std::vector<int> & oidx,
 			   const std::vector<ElemT> & w,
-			   const std::vector<std::vector<size_t>> & det,
+			   const DetsContainer & det,
 			   size_t bit_length,
 			   MPI_Comm b_comm,
 			   std::vector<double> & res) {
@@ -24,10 +24,10 @@ namespace sbd {
 	size_t thread_id = omp_get_thread_num();
 	size_t i_begin = thread_id;
 	size_t i_end   = det.size();
-	std::vector<double> local_res(2*oidx.size(),ElemT(0.0));
+	std::vector<double> local_res(2*oidx.size(),0.0);
 	for(size_t i=i_begin; i < i_end; i+=num_threads) {
 	  for(size_t io=0; io < oidx.size(); io++) {
-	    double weight = GetReal(Conjugate(w[i]) * w[i]);
+	    double weight = SquaredNorm(w[i]);
 	    if( getocc(det[i],bit_length,2*oidx[io]) ) {
 	      local_res[2*io] += weight;
 	    }
@@ -46,7 +46,7 @@ namespace sbd {
       }
       MpiAllreduce(res,MPI_SUM,b_comm);
     }
-    
+
   } // end namespace gdb
 } // end namespace sbd
 #endif

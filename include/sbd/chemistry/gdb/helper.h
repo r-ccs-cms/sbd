@@ -157,11 +157,11 @@ namespace sbd {
     }
 #endif
     
-    void getHalfDets(const std::vector<std::vector<size_t>> & det,
+    void getHalfDets(const sbd::det_vector<size_t> & det,
 		     size_t bit_length,
 		     size_t norb,
-		     std::vector<std::vector<size_t>> & adet,
-		     std::vector<std::vector<size_t>> & bdet,
+		     sbd::det_vector<size_t, sbd::det_kind::half> & adet,
+		     sbd::det_vector<size_t, sbd::det_kind::half> & bdet,
 		     std::vector<size_t> & adet_count,
 		     std::vector<size_t> & bdet_count) {
       const size_t N = det.size();
@@ -258,9 +258,9 @@ namespace sbd {
       }
     }
     
-    void makeDetIndexMap(const std::vector<std::vector<size_t>> & det,
-			 const std::vector<std::vector<size_t>> & adet,
-			 const std::vector<std::vector<size_t>> & bdet,
+    void makeDetIndexMap(const sbd::det_vector<size_t> & det,
+			 const sbd::det_vector<size_t, sbd::det_kind::half> & adet,
+			 const sbd::det_vector<size_t, sbd::det_kind::half> & bdet,
 			 const std::vector<size_t> & adet_count,
 			 const std::vector<size_t> & bdet_count,
 			 size_t bit_length,
@@ -303,14 +303,14 @@ namespace sbd {
 	*/
 	auto itia = std::lower_bound(adet.begin(),adet.end(),
 				     adet_temp,
-				     [](const std::vector<size_t> & lhs,
-					const std::vector<size_t> & rhs) {
+				     [](const auto & lhs,
+					const auto & rhs) {
 				       return sbd::less_from_back(lhs,rhs);
 				     });
 	auto itib = std::lower_bound(bdet.begin(),bdet.end(),
 				     bdet_temp,
-				     [](const std::vector<size_t> & lhs,
-					const std::vector<size_t> & rhs) {
+				     [](const auto & lhs,
+					const auto & rhs) {
 				       return sbd::less_from_back(lhs,rhs);
 				     });
 	if( itia == adet.end() || *itia != adet_temp ) {
@@ -328,9 +328,9 @@ namespace sbd {
       }
     }
     
-    void makeDetIndexMap(const std::vector<std::vector<size_t>> & det,
-			 const std::vector<std::vector<size_t>> & adet,
-			 const std::vector<std::vector<size_t>> & bdet,
+    void makeDetIndexMap(const sbd::det_vector<size_t> & det,
+			 const sbd::det_vector<size_t, sbd::det_kind::half> & adet,
+			 const sbd::det_vector<size_t, sbd::det_kind::half> & bdet,
 			 const std::vector<size_t> & adet_count,
 			 const std::vector<size_t> & bdet_count,
 			 size_t bit_length,
@@ -403,8 +403,9 @@ namespace sbd {
     }
     
     
-    void makeExcitationLookup(const std::vector<std::vector<size_t>> & hdet_bra,
-			      const std::vector<std::vector<size_t>> & hdet_ket,
+    template<typename HDetContainer>
+    void makeExcitationLookup(const HDetContainer & hdet_bra,
+			      const HDetContainer & hdet_ket,
 			      size_t bit_length,
 			      size_t norb,
 			      std::vector<std::vector<size_t>> & samedet,
@@ -457,10 +458,10 @@ namespace sbd {
       }
     }
     
-    void makeExcitationLookup(const std::vector<std::vector<size_t>> & adet_bra,
-			      const std::vector<std::vector<size_t>> & bdet_bra,
-			      const std::vector<std::vector<size_t>> & adet_ket,
-			      const std::vector<std::vector<size_t>> & bdet_ket,
+    void makeExcitationLookup(const sbd::det_vector<size_t, sbd::det_kind::half> & adet_bra,
+			      const sbd::det_vector<size_t, sbd::det_kind::half> & bdet_bra,
+			      const sbd::det_vector<size_t, sbd::det_kind::half> & adet_ket,
+			      const sbd::det_vector<size_t, sbd::det_kind::half> & bdet_ket,
 			      size_t bit_length,
 			      size_t norb,
 			      ExcitationLookup & exidx) {
@@ -714,7 +715,7 @@ namespace sbd {
       MPI_Comm_split(a_comm,b_comm_color,mpi_rank,&b_comm);
     }
     
-    void MakeHelpers(const std::vector<std::vector<size_t>> & det,
+    void MakeHelpers(const sbd::det_vector<size_t> & det,
 		     size_t bit_length,
 		     size_t norb,
 		     DetIndexMap & idxmap,
@@ -740,8 +741,8 @@ namespace sbd {
 	exidx[task-task_begin].slide = static_cast<int>(task);
       }
       
-      std::vector<std::vector<size_t>> adet;
-      std::vector<std::vector<size_t>> bdet;
+      sbd::det_vector<size_t, sbd::det_kind::half> adet;
+      sbd::det_vector<size_t, sbd::det_kind::half> bdet;
       std::vector<size_t> adet_count;
       std::vector<size_t> bdet_count;
       getHalfDets(det,bit_length,norb,adet,bdet,adet_count,bdet_count);
@@ -753,9 +754,9 @@ namespace sbd {
       // repeated zero-initialization of the 60.8 MB send/recv buffers.
       std::vector<size_t> det_scratch_send, det_scratch_recv;
 
-      std::vector<std::vector<size_t>> ket_det;
-      std::vector<std::vector<size_t>> ket_adet;
-      std::vector<std::vector<size_t>> ket_bdet;
+      sbd::det_vector<size_t> ket_det;
+      sbd::det_vector<size_t, sbd::det_kind::half> ket_adet;
+      sbd::det_vector<size_t, sbd::det_kind::half> ket_bdet;
       if ( task_begin != static_cast<size_t>(0) ) {
 	int slide = - exidx[0].slide;
 	sbd::MpiSlideWithScratch(det,ket_det,slide,b_comm,det_scratch_send,det_scratch_recv);

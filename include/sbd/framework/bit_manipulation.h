@@ -18,8 +18,13 @@
 #include <iostream>
 #include <fstream>
 
+#include <cassert>
+#include <cstddef>
+#include <numeric>
+#include <vector>
 
 #include "mpi.h"
+#include "sbd/framework/det_vector.h"
 
 #define SBD_BIT_LENGTH 20
 
@@ -142,9 +147,8 @@ namespace sbd {
    * @return true if a is considered smaller than b under this ordering,
    *         false otherwise.
    */
-  inline bool less_from_back(const std::vector<size_t> & a,
-			     const std::vector<size_t> & b) {
-    
+  template <typename VecA, typename VecB>
+  inline bool less_from_back(const VecA & a, const VecB & b) {
     size_t a_size = a.size();
     size_t b_size = b.size();
 
@@ -174,8 +178,8 @@ namespace sbd {
    * @return true if a is considered greater than b under this ordering,
    *         false otherwise.
    */
-  inline bool greater_from_back(const std::vector<size_t> & a,
-				const std::vector<size_t> & b) {
+  template <typename VecA, typename VecB>
+  inline bool greater_from_back(const VecA & a, const VecB & b) {
     return less_from_back(b,a);
   }
   
@@ -359,7 +363,8 @@ namespace sbd {
      @param[in] bit_length: length for the bitstring managed by each size_t
    */
 
-  void bitadvance(std::vector<size_t> & a, int bit_length) {
+  template<typename RowType>
+  void bitadvance(RowType& a, int bit_length) {
     size_t x;
     size_t d = (((size_t) 1) << bit_length) - 1;
     size_t v = (size_t) 1;
@@ -408,6 +413,28 @@ namespace sbd {
     }
   }
 
+  // det_vector overload: pointer-sort avoids moving non-constructible row objects.
+  void sort_bitarray(det_vector<size_t>& a) {
+    size_t n = a.size();
+    if (n <= 1) return;
+    size_t row_len = a.elem_size();
+    int elem = static_cast<int>(row_len) - 1;
+    std::vector<size_t*> ptrs(n);
+    for (size_t i = 0; i < n; i++) ptrs[i] = a[i].data();
+    sort_from_back_t(ptrs, 0, n, elem);
+    auto end_it = std::unique(ptrs.begin(), ptrs.end(),
+        [row_len](const size_t* x, const size_t* y) {
+            return std::memcmp(x, y, row_len * sizeof(size_t)) == 0;
+        });
+    size_t unique_n = static_cast<size_t>(end_it - ptrs.begin());
+    det_vector<size_t> result(unique_n);
+    for (size_t i = 0; i < unique_n; i++)
+        std::memcpy(result[i].data(), ptrs[i], row_len * sizeof(size_t));
+    a = std::move(result);
+  }
+
+
+
   /**
      Function to redistribute the bit string on each mpi processes.
      @param[in/out] config: set of bit strings to be redistributed
@@ -415,13 +442,14 @@ namespace sbd {
      @param[in/out] config_end: last bit string for each mpi process.
      @param[in/out] index_begin: first index of bit string for each mpi process.
      @param[in/out] index_end: last index of bit string for each mpi process.
-     @param[in] total_bit_length: total bit length represented by `std::vector<size_t>`
+     @param[in] total_bit_length: total bit length represented by `Container`
      @param[in] bit_length: length of bit string managed by each `size_t`
      @param[in] comm: mpi communicator
    */
-  void mpi_redistribution(std::vector<std::vector<size_t>> & config,
-			  std::vector<std::vector<size_t>> & config_begin,
-			  std::vector<std::vector<size_t>> & config_end,
+  template<typename Container>
+  void mpi_redistribution(Container & config,
+			  Container & config_begin,
+			  Container & config_end,
 			  std::vector<size_t> & index_begin,
 			  std::vector<size_t> & index_end,
 			  size_t total_bit_length,
@@ -455,7 +483,7 @@ namespace sbd {
     }
 
     size_t new_config_size = i_end[mpi_rank]-i_begin[mpi_rank];
-    std::vector<std::vector<size_t>> new_config;
+    Container new_config;
     for(int recv_rank=0; recv_rank < mpi_size; recv_rank++) {
       // find i_begin and i_end mpi process
       int mpi_rank_begin = 0;
@@ -477,7 +505,7 @@ namespace sbd {
 	if( mpi_rank == send_rank ) {
 	  size_t ii_min = std::max(i_begin[recv_rank],index_begin[send_rank]);
 	  size_t ii_max = std::min(i_end[recv_rank],  index_end[send_rank]);
-	  std::vector<std::vector<size_t>> config_transfer;
+	  Container config_transfer;
 	  if( (ii_max - ii_min) > 0 ) {
 	    config_transfer.resize(ii_max-ii_min);
 	    for(size_t i=ii_min; i < ii_max; i++) {
@@ -493,7 +521,7 @@ namespace sbd {
 	  }
 	}
 	if( ( mpi_rank == recv_rank ) && ( send_rank != recv_rank ) ) {
-	  std::vector<std::vector<size_t>> config_transfer;
+	  Container config_transfer;
 	  MpiRecv(config_transfer,send_rank,comm);
 	  new_config.insert(new_config.end(),config_transfer.begin(),config_transfer.end());
 	}
@@ -502,7 +530,7 @@ namespace sbd {
     } // end for(int recv_rank=0; recv_rank < mpi_size; recv_rank++)
 
     sort_bitarray(new_config);
-    config = new_config;
+    config = std::move(new_config);
 
     std::fill(send_config_size.begin(),send_config_size.end(),static_cast<size_t>(0));
     std::fill(config_size.begin(),config_size.end(),static_cast<size_t>(0));
@@ -545,13 +573,14 @@ namespace sbd {
      @param[in/out] config_end: last bit string for each mpi process.
      @param[in/out] index_begin: first index of bit string for each mpi process.
      @param[in/out] index_end: last index of bit string for each mpi process.
-     @param[in] total_bit_length: total bit length represented by `std::vector<size_t>`
+     @param[in] total_bit_length: total bit length represented by the Container element type
      @param[in] bit_length: length of bit string managed by each `size_t`
      @param[in] comm: mpi communicator
    */
-  void mpi_sort_bitarray(std::vector<std::vector<size_t>> & config,
-			 std::vector<std::vector<size_t>> & config_begin,
-			 std::vector<std::vector<size_t>> & config_end,
+  template<typename Container>
+  void mpi_sort_bitarray(Container & config,
+			 Container & config_begin,
+			 Container & config_end,
 			 std::vector<size_t> & index_begin,
 			 std::vector<size_t> & index_end,
 			 size_t total_bit_length,
@@ -608,17 +637,17 @@ namespace sbd {
       std::vector<size_t> config_end_a_end(bit_size,0);
       std::vector<size_t> config_end_b_end(bit_size,0);
       if( mpi_color == 0 ) {
-	config_begin_a[mpi_key] = config[0];
-	config_middle_a[mpi_key] = config[config.size()/2];
+	config_begin_a[mpi_key].assign(config[0].begin(), config[0].end());
+	config_middle_a[mpi_key].assign(config[config.size()/2].begin(), config[config.size()/2].end());
 	if( mpi_key == mpi_size_a - 1 ) {
-	  config_end_a_end = config[config.size()-1];
+	  config_end_a_end.assign(config[config.size()-1].begin(), config[config.size()-1].end());
 	  bitadvance(config_end_a_end,bit_length);
 	}
       }
       if( mpi_color == 1 ) {
-	config_begin_b[mpi_key] = config[0];
+	config_begin_b[mpi_key].assign(config[0].begin(), config[0].end());
 	if( mpi_key == mpi_size_b - 1 ) {
-	  config_end_b_end = config[config.size()-1];
+	  config_end_b_end.assign(config[config.size()-1].begin(), config[config.size()-1].end());
 	  bitadvance(config_end_b_end,bit_length);
 	}
       }
@@ -694,7 +723,7 @@ namespace sbd {
 	sleep(1);
 #endif
 
-	std::vector<std::vector<size_t>> new_config_b;
+	Container new_config_b;
 	for(int r_rank=0; r_rank < mpi_size; r_rank++) {
 	  for(int s_rank=0; s_rank < mpi_size_b; s_rank++) {
 
@@ -709,8 +738,8 @@ namespace sbd {
 		  if( config[0] < config_begin[r_rank] ) {
 		    auto itb = std::lower_bound(config.begin(),config.end(),
 						config_begin[r_rank],
-						[](const std::vector<size_t> & lhs,
-						   const std::vector<size_t> & rhs) {
+						[](const auto & lhs,
+						   const auto & rhs) {
 						  return lhs < rhs;
 						});
 		    i_begin = static_cast<size_t>(std::distance(config.begin(),itb));
@@ -718,8 +747,8 @@ namespace sbd {
 		  if( config_end[r_rank] <= config[config.size()-1] ) {
 		    auto ite = std::lower_bound(config.begin(),config.end(),
 						config_end[r_rank],
-						[](const std::vector<size_t> & lhs,
-						   const std::vector<size_t> & rhs) {
+						[](const auto & lhs,
+						   const auto & rhs) {
 						  return lhs < rhs;
 						});
 		    i_end = static_cast<size_t>(std::distance(config.begin(),ite));
@@ -737,7 +766,7 @@ namespace sbd {
 			  << "] = " << ( config_begin_b[s_rank] < config_end[r_rank] ) << std::endl;
 #endif
 
-		std::vector<std::vector<size_t>> config_transfer;
+		Container config_transfer;
 		size_t transfer_size = i_end-i_begin;
 		if( i_end-i_begin > 0 ) {
 		  config_transfer.resize(transfer_size);
@@ -754,7 +783,7 @@ namespace sbd {
 	      }
 	      if( ( r_rank == mpi_rank ) && ( s_rank+mpi_master_b != r_rank ) ) {
 
-		std::vector<std::vector<size_t>> config_transfer(0);
+		Container config_transfer;
 		MpiRecv(config_transfer,s_rank+mpi_master_b,comm);
 		new_config_b.insert(new_config_b.end(),config_transfer.begin(),config_transfer.end());
 
@@ -765,7 +794,7 @@ namespace sbd {
 
 	sort_bitarray(new_config_b);
 
-	std::vector<std::vector<size_t>> new_config_a;
+	Container new_config_a;
 	for(int s_rank=0; s_rank < mpi_size_a; s_rank++) {
 	  int r_rank = 2 * s_rank;
 	  if( r_rank < mpi_size ) {
@@ -779,7 +808,7 @@ namespace sbd {
 		i_begin = 0;
 		i_end = config.size()/2;
 	      }
-	      std::vector<std::vector<size_t>> config_transfer;
+	      Container config_transfer;
 	      config_transfer.resize(0);
 	      size_t transfer_size = i_end-i_begin;
 	      if( transfer_size > 0 ) {
@@ -795,7 +824,7 @@ namespace sbd {
 	      }
 	    }
 	    if( mpi_rank == r_rank && s_rank != r_rank ) {
-	      std::vector<std::vector<size_t>> config_transfer(0);
+	      Container config_transfer;
 	      MpiRecv(config_transfer,s_rank,comm);
 	      new_config_a.insert(new_config_a.end(),config_transfer.begin(),config_transfer.end());
 	    }
@@ -805,7 +834,7 @@ namespace sbd {
 	    if( mpi_rank == s_rank ) {
 	      size_t i_begin = config.size()/2;
 	      size_t i_end = config.size();
-	      std::vector<std::vector<size_t>> config_transfer;
+	      Container config_transfer;
 	      config_transfer.resize(0);
 	      size_t transfer_size = i_end-i_begin;
 	      if( transfer_size > 0 ) {
@@ -821,7 +850,7 @@ namespace sbd {
 	      }
 	    }
 	    if( ( mpi_rank == r_rank ) && ( s_rank != r_rank ) ) {
-	      std::vector<std::vector<size_t>> config_transfer(0);
+	      Container config_transfer;
 	      MpiRecv(config_transfer,s_rank,comm);
 	      new_config_a.insert(new_config_a.end(),config_transfer.begin(),config_transfer.end());
 	    }
@@ -838,8 +867,8 @@ namespace sbd {
 	std::set_union(new_config_a.begin(),new_config_a.end(),
 		       new_config_b.begin(),new_config_b.end(),
 		       std::back_inserter(config),
-		       [](const std::vector<size_t> & lhs,
-			  const std::vector<size_t> & rhs) {
+		       [](const auto & lhs,
+			  const auto & rhs) {
 			 return lhs < rhs;
 		       });
 
@@ -1240,6 +1269,574 @@ namespace sbd {
     }
 
 
+  }
+
+  inline bool equal_bitarray_from_back(const std::vector<size_t> &a,
+                                     const std::vector<size_t> &b) {
+    return !less_from_back(a, b) && !less_from_back(b, a);
+  }
+
+  template<typename DetsContainer>
+  void sort_unique_local_bitarray(DetsContainer& dets) {
+    sort_bitarray(dets);
+  }
+
+  inline int destination_by_splitters(
+    const std::vector<size_t> &det,
+    const std::vector<std::vector<size_t>> &splitters) {
+    auto it = std::upper_bound(splitters.begin(), splitters.end(), det,
+			       [](const std::vector<size_t>& a, const std::vector<size_t>& b) {
+				 return less_from_back(a, b); });
+    return static_cast<int>(it - splitters.begin());
+  }
+
+  template<typename DetsContainer>
+  void sort_global_bitarray(DetsContainer &dets,
+                          MPI_Comm comm) {
+    int mpi_rank = 0;
+    int mpi_size = 1;
+    MPI_Comm_rank(comm, &mpi_rank);
+    MPI_Comm_size(comm, &mpi_size);
+    sort_unique_local_bitarray(dets);
+    size_t local_num_words = 0;
+    if (!dets.empty()) {
+      local_num_words = dets[0].size();
+#ifndef NDEBUG
+      for (const auto &det : dets) {
+	assert(det.size() == local_num_words);
+      }
+#endif
+    }
+    
+    size_t num_words = 0;
+    MPI_Allreduce(&local_num_words, &num_words, 1,
+		  SBD_MPI_SIZE_T, MPI_MAX, comm);
+    
+    if (num_words == 0) {
+      dets.clear();
+      return;
+    }
+    
+    if (mpi_size == 1) {
+      return;
+    }
+    
+    const size_t local_n = dets.size();
+    
+    /*
+     * Sample selection.
+     * Oversampling factor = 4.
+     */
+    
+    const size_t oversample = 4;
+    const size_t max_samples =
+      std::min(local_n, oversample * static_cast<size_t>(mpi_size - 1));
+    std::vector<size_t> local_samples_flat;
+    local_samples_flat.reserve(max_samples * num_words);
+    if (max_samples > 0) {
+      for (size_t s = 0; s < max_samples; ++s) {
+	size_t idx = ((s + 1) * local_n) / (max_samples + 1);
+	if (idx >= local_n) idx = local_n - 1;
+	local_samples_flat.insert(local_samples_flat.end(),
+				  dets[idx].begin(), dets[idx].end());
+      }
+    }
+    
+    int local_sample_count = static_cast<int>(max_samples);
+    std::vector<int> sample_counts;
+    if (mpi_rank == 0) {
+      sample_counts.resize(mpi_size);
+    }
+    
+    MPI_Gather(&local_sample_count, 1, MPI_INT,
+	       sample_counts.data(), 1, MPI_INT,
+	       0, comm);
+    
+    std::vector<int> sample_word_counts;
+    std::vector<int> sample_word_displs;
+    std::vector<size_t> all_samples_flat;
+    
+    if (mpi_rank == 0) {
+      sample_word_counts.resize(mpi_size);
+      sample_word_displs.resize(mpi_size);
+      int total_sample_words = 0;
+      for (int r = 0; r < mpi_size; ++r) {
+	sample_word_counts[r] =
+          static_cast<int>(static_cast<size_t>(sample_counts[r]) * num_words);
+	sample_word_displs[r] = total_sample_words;
+	total_sample_words += sample_word_counts[r];
+      }
+      all_samples_flat.resize(total_sample_words);
+    }
+    
+    MPI_Gatherv(local_samples_flat.data(),
+		static_cast<int>(local_samples_flat.size()),
+		SBD_MPI_SIZE_T,
+		all_samples_flat.data(),
+		sample_word_counts.data(),
+		sample_word_displs.data(),
+		SBD_MPI_SIZE_T,
+		0, comm);
+    
+    std::vector<std::vector<size_t>> splitters;
+    
+    if (mpi_rank == 0) {
+      
+      const size_t total_samples =
+        all_samples_flat.size() / num_words;
+      
+      std::vector<std::vector<size_t>> all_samples(total_samples,
+						   std::vector<size_t>(num_words));
+      
+      for (size_t i = 0; i < total_samples; ++i) {
+	std::copy(all_samples_flat.begin() + i * num_words,
+		  all_samples_flat.begin() + (i + 1) * num_words,
+		  all_samples[i].begin());
+      }
+      
+      sort_unique_local_bitarray(all_samples);
+      const size_t ns = all_samples.size();
+      const size_t nsplit =
+        std::min(static_cast<size_t>(mpi_size - 1), ns);
+      
+      splitters.resize(nsplit, std::vector<size_t>(num_words));
+      for (size_t s = 0; s < nsplit; ++s) {
+	size_t idx = ((s + 1) * ns) / mpi_size;
+	if (idx >= ns) idx = ns - 1;
+	splitters[s] = all_samples[idx];
+      }
+      sort_unique_local_bitarray(splitters);
+    }
+    
+    int nsplitters = 0;
+    if (mpi_rank == 0) {
+      nsplitters = static_cast<int>(splitters.size());
+    }
+    
+    MPI_Bcast(&nsplitters, 1, MPI_INT, 0, comm);
+    std::vector<size_t> splitters_flat(
+		  static_cast<size_t>(nsplitters) * num_words);
+    if (mpi_rank == 0) {
+      for (int i = 0; i < nsplitters; ++i) {
+	std::copy(splitters[i].begin(), splitters[i].end(),
+		  splitters_flat.begin() + static_cast<size_t>(i) * num_words);
+      }
+    }
+    
+    MPI_Bcast(splitters_flat.data(),
+	      static_cast<int>(splitters_flat.size()),
+	      SBD_MPI_SIZE_T,
+	      0, comm);
+    
+    if (mpi_rank != 0) {
+      splitters.resize(nsplitters, std::vector<size_t>(num_words));
+      for (int i = 0; i < nsplitters; ++i) {
+	std::copy(splitters_flat.begin() + static_cast<size_t>(i) * num_words,
+		  splitters_flat.begin() + static_cast<size_t>(i + 1) * num_words,
+		  splitters[i].begin());
+      }
+    }
+    
+    /*
+      
+     * Bucket assignment.
+     
+     */
+    
+    std::vector<int> send_counts_det(mpi_size, 0);
+    
+    for (const auto &det : dets) {
+      int dest = destination_by_splitters(det, splitters);
+      if (dest >= mpi_size) dest = mpi_size - 1;
+      ++send_counts_det[dest];
+    }
+    
+    std::vector<int> send_counts_words(mpi_size, 0);
+    std::vector<int> recv_counts_words(mpi_size, 0);
+    std::vector<int> send_displs_words(mpi_size, 0);
+    std::vector<int> recv_displs_words(mpi_size, 0);
+    
+    for (int r = 0; r < mpi_size; ++r) {
+      send_counts_words[r] =
+        static_cast<int>(static_cast<size_t>(send_counts_det[r]) * num_words);
+    }
+    
+    MPI_Alltoall(send_counts_words.data(), 1, MPI_INT,
+		 recv_counts_words.data(), 1, MPI_INT,
+		 comm);
+    
+    for (int r = 1; r < mpi_size; ++r) {
+      send_displs_words[r] = send_displs_words[r - 1] + send_counts_words[r - 1];
+      recv_displs_words[r] = recv_displs_words[r - 1] + recv_counts_words[r - 1];
+    }
+    
+    const int total_send_words =
+      std::accumulate(send_counts_words.begin(), send_counts_words.end(), 0);
+    
+    const int total_recv_words =
+      std::accumulate(recv_counts_words.begin(), recv_counts_words.end(), 0);
+    
+    std::vector<size_t> sendbuf(total_send_words);
+    std::vector<size_t> recvbuf(total_recv_words);
+    std::vector<int> current_displs = send_displs_words;
+    
+    for (const auto &det : dets) {
+      int dest = destination_by_splitters(det, splitters);
+      if (dest >= mpi_size) dest = mpi_size - 1;
+      int pos = current_displs[dest];
+      std::copy(det.begin(), det.end(), sendbuf.begin() + pos);
+      current_displs[dest] += static_cast<int>(num_words);
+    }
+    
+    MPI_Alltoallv(sendbuf.data(),
+		  send_counts_words.data(),
+		  send_displs_words.data(),
+		  SBD_MPI_SIZE_T,
+		  recvbuf.data(),
+		  recv_counts_words.data(),
+		  recv_displs_words.data(),
+		  SBD_MPI_SIZE_T,
+		  comm);
+    
+    const size_t recv_n = recvbuf.size() / num_words;
+
+    dets.clear();
+    dets.resize(recv_n, std::vector<size_t>(num_words));
+
+    for (size_t i = 0; i < recv_n; ++i) {
+      std::copy(recvbuf.begin() + i * num_words,
+		recvbuf.begin() + (i + 1) * num_words,
+		dets[i].begin());
+    }
+    sort_unique_local_bitarray(dets);
+  }
+
+  inline size_t balanced_begin(const size_t global_n,
+			       const int mpi_size,
+			       const int rank) {
+    const size_t q = global_n / static_cast<size_t>(mpi_size);
+    const size_t r = global_n % static_cast<size_t>(mpi_size);
+    return q * static_cast<size_t>(rank)
+           + std::min(static_cast<size_t>(rank), r);
+  }
+
+  inline size_t balanced_end(const size_t global_n,
+                           const int mpi_size,
+                           const int rank) {
+    return balanced_begin(global_n, mpi_size, rank + 1);
+  }
+
+  template<typename DetsContainer>
+  void redistribution_bitarray(DetsContainer &dets,
+			       MPI_Comm comm) {
+
+    int mpi_rank = 0;
+    int mpi_size = 1;
+    MPI_Comm_rank(comm, &mpi_rank);
+    MPI_Comm_size(comm, &mpi_size);
+
+    const size_t local_n = dets.size();
+    size_t local_num_words = 0;
+    if (!dets.empty()) {
+      local_num_words = dets[0].size();
+#ifndef NDEBUG
+      for (const auto &det : dets) {
+	assert(det.size() == local_num_words);
+      }
+#endif
+    }
+    
+    size_t num_words = 0;
+    
+    MPI_Allreduce(&local_num_words, &num_words, 1,
+		  SBD_MPI_SIZE_T, MPI_MAX, comm);
+    
+    if (num_words == 0) {
+      dets.clear();
+      return;
+    }
+    
+    std::vector<size_t> all_local_n(mpi_size, 0);
+    MPI_Allgather(&local_n, 1, SBD_MPI_SIZE_T,
+		  all_local_n.data(), 1, SBD_MPI_SIZE_T,
+		  comm);
+    
+    size_t global_n = 0;
+    for (size_t n : all_local_n) {
+      global_n += n;
+    }
+    
+    if (global_n == 0) {
+      dets.clear();
+      return;
+    }
+
+    size_t local_begin = 0;
+    for (int r = 0; r < mpi_rank; ++r) {
+      local_begin += all_local_n[r];
+    }
+
+    const size_t local_end = local_begin + local_n;
+    std::vector<int> send_counts_words(mpi_size, 0);
+    std::vector<int> recv_counts_words(mpi_size, 0);
+    std::vector<int> send_displs_words(mpi_size, 0);
+    std::vector<int> recv_displs_words(mpi_size, 0);
+    for (int dest = 0; dest < mpi_size; ++dest) {
+      const size_t target_begin = balanced_begin(global_n, mpi_size, dest);
+      const size_t target_end   = balanced_end(global_n, mpi_size, dest);
+      const size_t overlap_begin = std::max(local_begin, target_begin);
+      const size_t overlap_end   = std::min(local_end, target_end);
+      if (overlap_begin < overlap_end) {
+	const size_t nsend_det = overlap_end - overlap_begin;
+	send_counts_words[dest] =
+          static_cast<int>(nsend_det * num_words);
+      }
+    }
+
+    MPI_Alltoall(send_counts_words.data(), 1, MPI_INT,
+		 recv_counts_words.data(), 1, MPI_INT,
+		 comm);
+
+    for (int r = 1; r < mpi_size; ++r) {
+      send_displs_words[r] =
+        send_displs_words[r - 1] + send_counts_words[r - 1];
+      recv_displs_words[r] =
+        recv_displs_words[r - 1] + recv_counts_words[r - 1];
+    }
+
+    const int total_send_words =
+      std::accumulate(send_counts_words.begin(),
+		      send_counts_words.end(), 0);
+
+    const int total_recv_words =
+      std::accumulate(recv_counts_words.begin(),
+		      recv_counts_words.end(), 0);
+
+    std::vector<size_t> sendbuf(total_send_words);
+    std::vector<size_t> recvbuf(total_recv_words);
+
+    for (int dest = 0; dest < mpi_size; ++dest) {
+      const size_t target_begin = balanced_begin(global_n, mpi_size, dest);
+      const size_t target_end   = balanced_end(global_n, mpi_size, dest);
+      const size_t overlap_begin = std::max(local_begin, target_begin);
+      const size_t overlap_end   = std::min(local_end, target_end);
+      if (overlap_begin >= overlap_end) continue;
+      const size_t local_offset = overlap_begin - local_begin;
+      const size_t nsend_det = overlap_end - overlap_begin;
+      size_t *ptr = sendbuf.data() + send_displs_words[dest];
+      for (size_t i = 0; i < nsend_det; ++i) {
+	const auto &det = dets[local_offset + i];
+	std::copy(det.begin(), det.end(), ptr + i * num_words);
+      }
+    }
+
+    MPI_Alltoallv(sendbuf.data(),
+		  send_counts_words.data(),
+		  send_displs_words.data(),
+		  SBD_MPI_SIZE_T,
+		  recvbuf.data(),
+		  recv_counts_words.data(),
+		  recv_displs_words.data(),
+		  SBD_MPI_SIZE_T,
+		  comm);
+
+    const size_t new_local_n =
+      static_cast<size_t>(total_recv_words) / num_words;
+
+    DetsContainer new_dets(new_local_n, std::vector<size_t>(num_words));
+
+    for (size_t i = 0; i < new_local_n; ++i) {
+      std::copy(recvbuf.begin() + i * num_words,
+		recvbuf.begin() + (i + 1) * num_words,
+		new_dets[i].begin());
+    }
+    dets.swap(new_dets);
+  }
+
+  template <typename ElemT, typename DetsContainer>
+  void redistribution_bitarray(DetsContainer &dets,
+			       std::vector<ElemT> &w,
+			       MPI_Comm comm) {
+    assert(dets.size() == w.size());
+
+    int mpi_rank = 0;
+    int mpi_size = 1;
+    MPI_Comm_rank(comm, &mpi_rank);
+    MPI_Comm_size(comm, &mpi_size);
+
+    const size_t local_n = dets.size();
+    
+    size_t local_num_words = 0;
+    if (!dets.empty()) {
+      local_num_words = dets[0].size();
+#ifndef NDEBUG
+      for (const auto &det : dets) {
+	assert(det.size() == local_num_words);
+      }
+#endif
+    }
+
+    size_t num_words = 0;
+    MPI_Allreduce(&local_num_words, &num_words, 1,
+		  SBD_MPI_SIZE_T, MPI_MAX, comm);
+
+    if (num_words == 0) {
+      dets.clear();
+      w.clear();
+      return;
+    }
+
+    std::vector<size_t> all_local_n(mpi_size, 0);
+    MPI_Allgather(&local_n, 1, SBD_MPI_SIZE_T,
+		  all_local_n.data(), 1, SBD_MPI_SIZE_T,
+		  comm);
+    
+    size_t global_n = 0;
+    for (size_t n : all_local_n) {
+      global_n += n;
+    }
+    
+    if (global_n == 0) {
+      dets.clear();
+      w.clear();
+      return;
+    }
+    
+    size_t local_begin = 0;
+    for (int r = 0; r < mpi_rank; ++r) {
+      local_begin += all_local_n[r];
+    }
+    const size_t local_end = local_begin + local_n;
+    
+    std::vector<int> send_counts_det(mpi_size, 0);
+    std::vector<int> recv_counts_det(mpi_size, 0);
+    std::vector<int> send_displs_det(mpi_size, 0);
+    std::vector<int> recv_displs_det(mpi_size, 0);
+    
+    for (int dest = 0; dest < mpi_size; ++dest) {
+      const size_t target_begin = balanced_begin(global_n, mpi_size, dest);
+      const size_t target_end   = balanced_end(global_n, mpi_size, dest);
+      
+      const size_t overlap_begin = std::max(local_begin, target_begin);
+      const size_t overlap_end   = std::min(local_end, target_end);
+      
+      if (overlap_begin < overlap_end) {
+	send_counts_det[dest] =
+          static_cast<int>(overlap_end - overlap_begin);
+      }
+    }
+    
+    MPI_Alltoall(send_counts_det.data(), 1, MPI_INT,
+		 recv_counts_det.data(), 1, MPI_INT,
+		 comm);
+    
+    for (int r = 1; r < mpi_size; ++r) {
+      send_displs_det[r] =
+        send_displs_det[r - 1] + send_counts_det[r - 1];
+      recv_displs_det[r] =
+        recv_displs_det[r - 1] + recv_counts_det[r - 1];
+    }
+    
+    const int total_send_det =
+      std::accumulate(send_counts_det.begin(),
+                      send_counts_det.end(), 0);
+    
+    const int total_recv_det =
+      std::accumulate(recv_counts_det.begin(),
+                      recv_counts_det.end(), 0);
+    
+    std::vector<int> send_counts_words(mpi_size, 0);
+    std::vector<int> recv_counts_words(mpi_size, 0);
+    std::vector<int> send_displs_words(mpi_size, 0);
+    std::vector<int> recv_displs_words(mpi_size, 0);
+    
+    for (int r = 0; r < mpi_size; ++r) {
+      send_counts_words[r] =
+        static_cast<int>(static_cast<size_t>(send_counts_det[r]) * num_words);
+      recv_counts_words[r] =
+        static_cast<int>(static_cast<size_t>(recv_counts_det[r]) * num_words);
+    }
+    
+    for (int r = 1; r < mpi_size; ++r) {
+      send_displs_words[r] =
+        send_displs_words[r - 1] + send_counts_words[r - 1];
+      recv_displs_words[r] =
+        recv_displs_words[r - 1] + recv_counts_words[r - 1];
+    }
+    
+    const int total_send_words =
+      std::accumulate(send_counts_words.begin(),
+                      send_counts_words.end(), 0);
+    
+    const int total_recv_words =
+      std::accumulate(recv_counts_words.begin(),
+                      recv_counts_words.end(), 0);
+    
+    std::vector<size_t> sendbuf_det(total_send_words);
+    std::vector<size_t> recvbuf_det(total_recv_words);
+    
+    std::vector<ElemT> sendbuf_w(total_send_det);
+    std::vector<ElemT> recvbuf_w(total_recv_det);
+    
+    for (int dest = 0; dest < mpi_size; ++dest) {
+      const size_t target_begin = balanced_begin(global_n, mpi_size, dest);
+      const size_t target_end   = balanced_end(global_n, mpi_size, dest);
+      
+      const size_t overlap_begin = std::max(local_begin, target_begin);
+      const size_t overlap_end   = std::min(local_end, target_end);
+      
+      if (overlap_begin >= overlap_end) continue;
+      
+      const size_t local_offset = overlap_begin - local_begin;
+      const size_t nsend_det = overlap_end - overlap_begin;
+      
+      size_t *ptr_det =
+        sendbuf_det.data() + send_displs_words[dest];
+      
+      ElemT *ptr_w =
+        sendbuf_w.data() + send_displs_det[dest];
+      
+      for (size_t i = 0; i < nsend_det; ++i) {
+	const auto &det = dets[local_offset + i];
+	
+	std::copy(det.begin(), det.end(),
+		  ptr_det + i * num_words);
+	
+	ptr_w[i] = w[local_offset + i];
+      }
+    }
+
+    MPI_Alltoallv(sendbuf_det.data(),
+		  send_counts_words.data(),
+		  send_displs_words.data(),
+		  SBD_MPI_SIZE_T,
+		  recvbuf_det.data(),
+		  recv_counts_words.data(),
+		  recv_displs_words.data(),
+		  SBD_MPI_SIZE_T,
+		  comm);
+    
+    MPI_Alltoallv(sendbuf_w.data(),
+		  send_counts_det.data(),
+		  send_displs_det.data(),
+		  GetMpiType<ElemT>::MpiT,
+		  recvbuf_w.data(),
+		  recv_counts_det.data(),
+		  recv_displs_det.data(),
+		  GetMpiType<ElemT>::MpiT,
+		  comm);
+    
+    const size_t new_local_n = static_cast<size_t>(total_recv_det);
+    
+    DetsContainer new_dets(new_local_n, std::vector<size_t>(num_words));
+
+    for (size_t i = 0; i < new_local_n; ++i) {
+      std::copy(recvbuf_det.begin() + i * num_words,
+		recvbuf_det.begin() + (i + 1) * num_words,
+		new_dets[i].begin());
+    }
+    dets.swap(new_dets);
+    w.swap(recvbuf_w);
   }
 
 

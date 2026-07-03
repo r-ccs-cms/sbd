@@ -19,6 +19,7 @@
 #include "sbd/chemistry/gdb/correlation.h"
 #include "sbd/chemistry/gdb/restart.h"
 #include "sbd/chemistry/gdb/carryover.h"
+#include "sbd/chemistry/gdb/expansion.h"
 #include "sbd/chemistry/gdb/sbdiag.h"
 
 #endif

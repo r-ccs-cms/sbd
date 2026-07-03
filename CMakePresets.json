@@ -1,0 +1,84 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 20, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "macos-cpu",
+      "displayName": "macOS CPU (system Clang / homebrew OpenMPI + OpenBLAS)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/macos-cpu",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SBD_GPU_BACKEND": "none"
+      }
+    },
+    {
+      "name": "linux-cpu",
+      "displayName": "Linux CPU (GCC / system MPI / BLAS)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/linux-cpu",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SBD_GPU_BACKEND": "none"
+      }
+    },
+    {
+      "name": "craype-thrust",
+      "displayName": "Cray PE + nvc++ Thrust (GH200 / cc90)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/craype-thrust",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE":              "Release",
+        "CMAKE_SYSTEM_NAME":             "CrayLinuxEnvironment",
+        "SBD_GPU_BACKEND":               "thrust",
+        "SBD_GPU_ARCH":                  "cc90",
+        "SBD_THRUST_SAFE_MPI_ALLREDUCE": "ON"
+      }
+    },
+    {
+      "name": "nvhpc-thrust",
+      "displayName": "Standalone nvc++ + Thrust (system MPI, cc90)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/nvhpc-thrust",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/nvhpc.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE":              "Release",
+        "SBD_GPU_BACKEND":               "thrust",
+        "SBD_GPU_ARCH":                  "cc90",
+        "SBD_THRUST_SAFE_MPI_ALLREDUCE": "ON"
+      }
+    },
+    {
+      "name": "omp5-nvidia",
+      "displayName": "NVIDIA GPU — OpenMP 5 offload via nvc++ (cc100)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/omp5-nvidia",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/nvhpc.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SBD_GPU_BACKEND":  "omp5",
+        "SBD_GPU_ARCH":     "cc100"
+      }
+    },
+    {
+      "name": "omp5-amd",
+      "displayName": "AMD GPU — OpenMP 5 offload via amdclang++ (gfx90a / MI250X)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/omp5-amd",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/amdclang.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SBD_GPU_BACKEND":  "omp5",
+        "SBD_GPU_ARCH":     "gfx90a"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "macos-cpu",     "configurePreset": "macos-cpu" },
+    { "name": "linux-cpu",     "configurePreset": "linux-cpu" },
+    { "name": "craype-thrust", "configurePreset": "craype-thrust" },
+    { "name": "nvhpc-thrust",  "configurePreset": "nvhpc-thrust" },
+    { "name": "omp5-nvidia",   "configurePreset": "omp5-nvidia" },
+    { "name": "omp5-amd",      "configurePreset": "omp5-amd" }
+  ]
+}

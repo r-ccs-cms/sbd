@@ -29,7 +29,7 @@ namespace sbd {
     if( init == 0 ) {
       if( mpi_rank_t == 0 ) {
 	w.resize(basis.size());
-	Randomize(w,b_comm,h_comm,seed);
+	Randomize(seed,w,b_comm,h_comm);
       }
       MpiBcast(w,0,t_comm);
     }
@@ -90,7 +90,7 @@ namespace sbd {
 	if( mpi_rank_t == 0 ) {
 	  if( mpi_rank_h == 0 ) {
 	    V[iv].resize(w_size);
-	    Randomize(V[iv],b_comm,seed+iv);
+	    Randomize(seed+iv,V[iv],b_comm);
 	    MGS(V,iv,V[iv],vdot,b_comm);
 	    MGS(V,iv,V[iv],vdot,b_comm);
 	    Normalize(V[iv],vnrm,b_comm);
@@ -291,7 +291,7 @@ namespace sbd {
 	if( mpi_rank_t == 0 ) {
 	  if( mpi_rank_h == 0 ) {
 	    V[iv].resize(w_size);
-	    Randomize(V[iv],b_comm,seed+iv);
+	    Randomize(seed+iv,V[iv],b_comm);
 	    MGS(V,iv,V[iv],vdot,b_comm);
 	    MGS(V,iv,V[iv],vdot,b_comm);
 	    Normalize(V[iv],vnrm,b_comm);

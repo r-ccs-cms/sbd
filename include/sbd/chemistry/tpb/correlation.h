@@ -436,9 +436,6 @@ namespace sbd {
 
     size_t num_threads = 1;
     num_threads = omp_get_max_threads();
-    
-    std::vector<std::vector<std::vector<ElemT>>> onebody_t(num_threads,onebody);
-    std::vector<std::vector<std::vector<ElemT>>> twobody_t(num_threads,twobody);
 
     
     if( mpi_rank_t == 0 ) {
@@ -455,7 +452,7 @@ namespace sbd {
                      +  ib - helper[0].braBetaStart;
             if( ( i % mpi_size_h ) == mpi_rank_h ) {
               DetFromAlphaBeta(adet[ia],bdet[ib],bit_length,norb,DetT);
-              ZeroDiffCorrelation(DetT,W[i],bit_length,norb,onebody_t[thread_id],twobody_t[thread_id]);
+              ZeroDiffCorrelation(DetT,W[i],bit_length,norb,onebody,twobody);
             }
           }
         }
@@ -500,12 +497,12 @@ namespace sbd {
 		  OneDiffCorrelation(DetI,W[braIdx],T[ketIdx],bit_length,norb,
 				     helper[task].SinglesAlphaCrAnSM[ia-helper[task].braAlphaStart][2*j+0],
 				     helper[task].SinglesAlphaCrAnSM[ia-helper[task].braAlphaStart][2*j+1],
-				     onebody_t[thread_id],twobody_t[thread_id]);
+				     onebody,twobody);
 		  /*
 		  DetFromAlphaBeta(adet[ja],bdet[ib],bit_length,norb,DetJ);
 		  CorrelationTermAddition(DetI,DetJ,W[braIdx],T[ketIdx],
 					  bit_length,norb,c,d,
-					  onebody_t[thread_id],twobody_t[thread_id]);
+					  onebody,twobody);
 		  */
 		}
 		// double alpha excitation
@@ -518,12 +515,12 @@ namespace sbd {
 				     helper[task].DoublesAlphaCrAnSM[ia-helper[task].braAlphaStart][4*j+1],
 				     helper[task].DoublesAlphaCrAnSM[ia-helper[task].braAlphaStart][4*j+2],
 				     helper[task].DoublesAlphaCrAnSM[ia-helper[task].braAlphaStart][4*j+3],
-				     onebody_t[thread_id],twobody_t[thread_id]);
+				     onebody,twobody);
 		  /*
 		  DetFromAlphaBeta(adet[ja],bdet[ib],bit_length,norb,DetJ);
 		  CorrelationTermAddition(DetI,DetJ,W[braIdx],T[ketIdx],
 					  bit_length,norb,c,d,
-					  onebody_t[thread_id],twobody_t[thread_id]);
+					  onebody,twobody);
 		  */
 		}
 		
@@ -549,12 +546,12 @@ namespace sbd {
 		  OneDiffCorrelation(DetI,W[braIdx],T[ketIdx],bit_length,norb,
 				     helper[task].SinglesBetaCrAnSM[ib-helper[task].braBetaStart][2*j+0],
 				     helper[task].SinglesBetaCrAnSM[ib-helper[task].braBetaStart][2*j+1],
-				     onebody_t[thread_id],twobody_t[thread_id]);
+				     onebody,twobody);
 		  /*
 		  DetFromAlphaBeta(adet[ia],bdet[jb],bit_length,norb,DetJ);
 		  CorrelationTermAddition(DetI,DetJ,W[braIdx],T[ketIdx],
 					  bit_length,norb,c,d,
-					  onebody_t[thread_id],twobody_t[thread_id]);
+					  onebody,twobody);
 		  */
 		}
 		// double beta excitation
@@ -567,12 +564,12 @@ namespace sbd {
 				     helper[task].DoublesBetaCrAnSM[ib-helper[task].braBetaStart][4*j+1],
 				     helper[task].DoublesBetaCrAnSM[ib-helper[task].braBetaStart][4*j+2],
 				     helper[task].DoublesBetaCrAnSM[ib-helper[task].braBetaStart][4*j+3],
-				     onebody_t[thread_id],twobody_t[thread_id]);
+				     onebody,twobody);
 		  /*
 		  DetFromAlphaBeta(adet[ia],bdet[jb],bit_length,norb,DetJ);
 		  CorrelationTermAddition(DetI,DetJ,W[braIdx],T[ketIdx],
 					bit_length,norb,c,d,
-					  onebody_t[thread_id],twobody_t[thread_id]);
+					  onebody,twobody);
 		  */
 		}
 	      } // end for(size_t ib=ib_start; ib < ib_end; ib++)
@@ -602,12 +599,12 @@ namespace sbd {
 				       helper[task].SinglesBetaCrAnSM[ib-helper[task].braBetaStart][2*k+0],
 				       helper[task].SinglesAlphaCrAnSM[ia-helper[task].braAlphaStart][2*j+1],
 				       helper[task].SinglesBetaCrAnSM[ib-helper[task].braBetaStart][2*k+1],
-				       onebody_t[thread_id],twobody_t[thread_id]);
+				       onebody,twobody);
 		    /*
 		    DetFromAlphaBeta(adet[ja],bdet[jb],bit_length,norb,DetJ);
 		    CorrelationTermAddition(DetI,DetJ,W[braIdx],T[ketIdx],
 					    bit_length,norb,c,d,
-					    onebody_t[thread_id],twobody_t[thread_id]);
+					    onebody,twobody);
 		    */
 		  }
 		}
@@ -630,24 +627,6 @@ namespace sbd {
 	
     } // end for(size_t task=0; task < helper.size(); task++)
 
-    for(size_t tid = 0; tid < num_threads; tid++) {
-#pragma omp parallel for
-      for(size_t i=0; i < norb*norb; i++) {
-	for(size_t s=0; s < onebody.size(); s++) {
-	  onebody[s][i] += onebody_t[tid][s][i];
-	}
-      }
-    }
-
-    for(size_t tid = 0; tid < num_threads; tid++) {
-#pragma omp parallel for
-      for(size_t i=0; i < norb*norb*norb*norb; i++) {
-	for(size_t s=0; s < twobody.size(); s++) {
-	  twobody[s][i] += twobody_t[tid][s][i];
-	}
-      }
-    }
-    
     for(int s=0; s < 2; s++) {
       MpiAllreduce(onebody[s],MPI_SUM,b_comm);
       MpiAllreduce(onebody[s],MPI_SUM,t_comm);

@@ -48,7 +48,7 @@ namespace sbd {
     for(size_t ia=adet_begin; ia < adet_end; ia++) {
       for(size_t ib=bdet_begin; ib < bdet_end; ib++) {
 	size_t idx = (ia - adet_begin) * bdet_size + ib - bdet_begin;
-	RealT weight = GetReal(Conjugate(w[idx])*w[idx]);
+	RealT weight = SquaredNorm(w[idx]);
 	if( weight > cutoff ) {
 	  total_weight_local += weight;
 	  adet_count[ia]++;
