@@ -129,8 +129,8 @@ namespace sbd {
 	    if( itk != BDets.begin()+ketBetaEnd ) {
 	      auto ik = std::distance(BDets.begin(),itk);
 	      helper.SinglesFromBeta[ib-braBetaStart].push_back(static_cast<size_t>(ik));
-	      helper.SinglesBetaCrAn[ib-braAlphaStart].push_back(2*open[k]+1);
-	      helper.SinglesBetaCrAn[ib-braAlphaStart].push_back(2*closed[j]+1);
+	      helper.SinglesBetaCrAn[ib-braBetaStart].push_back(2*open[k]+1);
+	      helper.SinglesBetaCrAn[ib-braBetaStart].push_back(2*closed[j]+1);
 	    }
 	  }
         }
