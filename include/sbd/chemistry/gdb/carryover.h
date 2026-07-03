@@ -8,12 +8,12 @@
 namespace sbd {
   namespace gdb {
 
-    template <typename ElemT, typename RealT>
+    template <typename ElemT, typename RealT, typename DetsContainer>
     void CarryOverDet(const std::vector<ElemT> & w,
-		      const std::vector<std::vector<size_t>> & det,
+		      const DetsContainer & det,
 		      MPI_Comm b_comm,
 		      size_t kept,
-		      std::vector<std::vector<size_t>> & rdet,
+		      sbd::det_vector<size_t> & rdet,
 		      RealT & discarted_weight) {
       // using RealT = typename GetRealType<ElemT>::RealT;
       std::vector<RealT> r(w.size());
@@ -67,12 +67,12 @@ namespace sbd {
       sort_bitarray(rdet);
     }
 
-    template <typename ElemT, typename RealT>
+    template <typename ElemT, typename RealT, typename InDetsContainer, typename OutDetsContainer>
     void WeightTruncation(const std::vector<ElemT> & w,
-			  const std::vector<std::vector<size_t>> & det,
+			  const InDetsContainer & det,
 			  RealT threshold,
 			  std::vector<ElemT> & rw,
-			  std::vector<std::vector<size_t>> & rdet) {
+			  OutDetsContainer & rdet) {
 
       const size_t n = det.size();
 

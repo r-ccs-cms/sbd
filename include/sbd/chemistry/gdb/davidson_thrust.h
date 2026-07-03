@@ -8,9 +8,9 @@
 namespace sbd {
   namespace gdb {
 
-    template <typename ElemT>
+    template <typename ElemT, typename DetsContainer>
     void BasisInitVector(std::vector<ElemT> & w,
-			 const std::vector<std::vector<size_t>> & det,
+			 const DetsContainer & det,
 			 MPI_Comm h_comm,
 			 MPI_Comm b_comm,
 			 MPI_Comm t_comm,

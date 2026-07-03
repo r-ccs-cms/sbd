@@ -9,13 +9,13 @@ namespace sbd {
 
   namespace gdb {
 
-    template <typename ElemT>
+    template <typename ElemT, typename DetsContainer>
     void mult(const std::vector<ElemT> & hii,
 	      const std::vector<ElemT> & wk,
 	      std::vector<ElemT> & wb,
 	      size_t bit_length,
 	      size_t norb,
-	      const std::vector<std::vector<size_t>> & det,
+	      const DetsContainer & det,
 	      const DetIndexMap & idxmap,
 	      const std::vector<ExcitationLookup> & exidx,
 	      const ElemT & I0,

@@ -10,9 +10,9 @@ namespace sbd {
 
     /**
      */
-    template <typename ElemT>
+    template <typename ElemT, typename DetsContainer>
     void Correlation(const std::vector<ElemT> & w,
-		     const std::vector<std::vector<size_t>> & det,
+		     const DetsContainer & det,
 		     size_t bit_length,
 		     size_t norb,
 		     const DetIndexMap idxmap,

@@ -188,6 +188,8 @@ namespace sbd {
       sbd::SetupIntegrals(fcidump,L,N,I0,I1,I2);
 
       int norbs = L;
+      sbd::det_vector<size_t>::init_elem_size((2*norbs + bit_length - 1) / bit_length);
+      sbd::det_vector<size_t, sbd::det_kind::half>::init_elem_size((norbs + bit_length - 1) / bit_length);
 
 #ifdef USE_OMP_OFFLOAD
       // check orbital count and determinant size : there are limits in omp_offload.h

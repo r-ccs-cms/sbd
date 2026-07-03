@@ -359,7 +359,8 @@ namespace sbd {
       int b_comm_size = sbd_data.b_comm_size;
       int h_comm_size = mpi_size / (t_comm_size*b_comm_size);
       size_t bit_length = sbd_data.bit_length;
-      size_t system_size = sbd_data.system_size;      
+      size_t system_size = sbd_data.system_size;
+      det_vector<size_t>::init_elem_size((system_size + bit_length - 1) / bit_length);
       MPI_Comm h_comm;
       MPI_Comm b_comm;
       MPI_Comm t_comm;

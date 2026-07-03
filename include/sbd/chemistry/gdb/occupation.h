@@ -8,10 +8,10 @@
 namespace sbd {
   namespace gdb {
 
-    template <typename ElemT>
+    template <typename ElemT, typename DetsContainer>
     void OccupationDensity(const std::vector<int> & oidx,
 			   const std::vector<ElemT> & w,
-			   const std::vector<std::vector<size_t>> & det,
+			   const DetsContainer & det,
 			   size_t bit_length,
 			   MPI_Comm b_comm,
 			   std::vector<double> & res) {
@@ -46,7 +46,7 @@ namespace sbd {
       }
       MpiAllreduce(res,MPI_SUM,b_comm);
     }
-    
+
   } // end namespace gdb
 } // end namespace sbd
 #endif

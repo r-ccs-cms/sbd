@@ -61,7 +61,7 @@ int main(int argc, char * argv[]) {
   int N;
   double energy;
   std::vector<double> density;
-  std::vector<std::vector<size_t>> codet;
+  sbd::det_vector<size_t> codet;
   std::vector<std::vector<Elem>> one_p_rdm;
   std::vector<std::vector<Elem>> two_p_rdm;
   sbd::FCIDump fcidump;
@@ -88,7 +88,7 @@ int main(int argc, char * argv[]) {
       N = std::atoi(value.c_str());
     }
   }
-  std::vector<std::vector<size_t>> det;
+  sbd::det_vector<size_t> det;
   int t_comm_size = sbd_data.t_comm_size;
   int b_comm_size = sbd_data.b_comm_size;
   int h_comm_size = mpi_size / (t_comm_size*b_comm_size);
@@ -128,11 +128,13 @@ int main(int argc, char * argv[]) {
     std::cout << " " << sbd::make_timestamp()
 	      << " start setup determinant " << std::endl;
   }
-  std::vector<std::vector<size_t>> det;
+  sbd::det_vector<size_t> det;
   int t_comm_size = sbd_data.t_comm_size;
   int b_comm_size = sbd_data.b_comm_size;
   int h_comm_size = mpi_size / (t_comm_size*b_comm_size);
   size_t bit_length = sbd_data.bit_length;
+  sbd::det_vector<size_t>::init_elem_size((2*L + bit_length - 1) / bit_length);
+  sbd::det_vector<size_t, sbd::det_kind::half>::init_elem_size((L + bit_length - 1) / bit_length);
   MPI_Comm h_comm;
   MPI_Comm b_comm;
   MPI_Comm t_comm;

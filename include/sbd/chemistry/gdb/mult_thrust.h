@@ -150,10 +150,11 @@ public:
 		return detsums_;
 	}
 
+	template<typename DetsContainer>
 	void Init(
         const size_t bit_length_in,
         const size_t norbs_in,
-		const std::vector<std::vector<size_t>> &dets_in,
+		const DetsContainer &dets_in,
 		const DetIndexMap &idxmap_in,
 		const std::vector<ExcitationLookup>& exidx_in,
 		const ElemT &I0_in,
@@ -176,10 +177,11 @@ public:
 
 // contructor for Mult data
 template <typename ElemT>
+template <typename DetsContainer>
 void MultGDBThrust<ElemT>::Init(
 	    const size_t bit_length_in,
         const size_t norbs_in,
-		const std::vector<std::vector<size_t>> &dets_in,
+		const DetsContainer &dets_in,
 		const DetIndexMap &idxmap_in,
 		const std::vector<ExcitationLookup>& exidx_in,
 		const ElemT &I0_in,

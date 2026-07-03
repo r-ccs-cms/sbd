@@ -18,32 +18,28 @@ inline int omp_get_num_threads() { return 1; }
 
 namespace sbd {
 
+  template<typename DetsContainer>
   void append_candidates_unique(
-    std::vector<std::vector<size_t>>& dets,
-    std::vector<std::vector<size_t>>& candidates) {
+    DetsContainer& dets,
+    DetsContainer& candidates) {
 
     if (candidates.empty()) {
       return;
     }
-    auto comp = [](const std::vector<size_t>& a,
-                   const std::vector<size_t>& b) {
-      return less_from_back(a, b);
-    };
 
-    std::sort(candidates.begin(), candidates.end(), comp);
-    candidates.erase(
-        std::unique(candidates.begin(), candidates.end()),
-        candidates.end());
+    sort_unique_local_bitarray(candidates);
 
     if (dets.empty()) {
       dets = std::move(candidates);
       return;
     }
 
-    std::sort(dets.begin(), dets.end(), comp);
-    dets.erase(std::unique(dets.begin(), dets.end()), dets.end());
+    sort_unique_local_bitarray(dets);
 
-    std::vector<std::vector<size_t>> merged;
+    auto comp = [](const auto& a, const auto& b) {
+      return less_from_back(a, b);
+    };
+    DetsContainer merged;
     merged.reserve(dets.size() + candidates.size());
     std::merge(
         std::make_move_iterator(dets.begin()),
@@ -52,7 +48,7 @@ namespace sbd {
         std::make_move_iterator(candidates.end()),
         std::back_inserter(merged),
         comp);
-    merged.erase(std::unique(merged.begin(), merged.end()), merged.end());
+    merged.resize(std::unique(merged.begin(), merged.end()) - merged.begin());
     dets = std::move(merged);
   }
 
@@ -75,7 +71,7 @@ namespace sbd {
     }
     append_candidates_unique(dets, candidates_all);
   }
- 
+
   namespace gdb {
 
     void singles_from_hdet(const std::vector<size_t> & hdet,
@@ -184,7 +180,7 @@ namespace sbd {
       }
     }
     
-    void makeHeatbathLookup(const std::vector<std::vector<size_t>> & hdet,
+    void makeHeatbathLookup(const sbd::det_vector<size_t, sbd::det_kind::half> & hdet,
 			    size_t bit_length,
 			    size_t norb,
 			    int spin,
@@ -220,9 +216,9 @@ namespace sbd {
        @note results includes the original determinants
      */
     template <typename ElemT, typename RealT>
-    void local_heatbath_expansion_lookup(const std::vector<std::vector<size_t>> & det,
-					 const std::vector<std::vector<size_t>> & adet,
-					 const std::vector<std::vector<size_t>> & bdet,
+    void local_heatbath_expansion_lookup(const sbd::det_vector<size_t> & det,
+					 const sbd::det_vector<size_t, sbd::det_kind::half> & adet,
+					 const sbd::det_vector<size_t, sbd::det_kind::half> & bdet,
 					 const std::vector<size_t> & adet_count,
 					 const std::vector<size_t> & bdet_count,
 					 const std::vector<ElemT> & w,
@@ -233,7 +229,7 @@ namespace sbd {
 					 const twoInt<ElemT> & I2,
 					 RealT cutoff,
 					 size_t max_batch_size,
-					 std::vector<std::vector<size_t>> & edet) {
+					 sbd::det_vector<size_t> & edet) {
 
       DetIndexMap idxmap;
       makeDetIndexMap(det,adet,bdet,adet_count,bdet_count,
@@ -304,7 +300,7 @@ namespace sbd {
 	const size_t pair_begin = num_adet_det_pairs * thread_id / num_threads_in_parallel;
 	const size_t pair_end   = num_adet_det_pairs * (thread_id + 1) / num_threads_in_parallel;
 
-	std::vector<std::vector<size_t>> candidates;
+	sbd::det_vector<size_t> candidates;
 	candidates.reserve(local_batch_size);
 
 	auto flush_candidates = [&]() {
@@ -326,7 +322,7 @@ namespace sbd {
 	  }
 	};
 
-	auto cdet = det[0];
+	std::vector<size_t> cdet = det[0];
 
 	if(pair_begin < pair_end) {
 	  size_t ia = static_cast<size_t>(
@@ -432,7 +428,7 @@ namespace sbd {
     @brief 
     */
     template <typename ElemT, typename RealT>
-    void local_heatbath_expansion(const std::vector<std::vector<size_t>> & det,
+    void local_heatbath_expansion(const sbd::det_vector<size_t> & det,
 				  const std::vector<ElemT> & w,
 				  size_t bit_length,
 				  size_t norb,
@@ -441,12 +437,12 @@ namespace sbd {
 				  const twoInt<ElemT> & I2,
 				  RealT cutoff,
 				  size_t max_batch_size,
-				  std::vector<std::vector<size_t>> & edet) {
+				  sbd::det_vector<size_t> & edet) {
 
       if( det.size() == static_cast<size_t>(0) ) return;
-      
-      std::vector<std::vector<size_t>> adet;
-      std::vector<std::vector<size_t>> bdet;
+
+      sbd::det_vector<size_t, sbd::det_kind::half> adet;
+      sbd::det_vector<size_t, sbd::det_kind::half> bdet;
       std::vector<size_t> adet_count;
       std::vector<size_t> bdet_count;
       getHalfDets(det,bit_length,norb,adet,bdet,adet_count,bdet_count);
@@ -499,7 +495,7 @@ namespace sbd {
 	const size_t pair_begin = num_adet_det_pairs * thread_id / num_threads_in_parallel;
 	const size_t pair_end   = num_adet_det_pairs * (thread_id + 1) / num_threads_in_parallel;
 
-	std::vector<std::vector<size_t>> candidates;
+	sbd::det_vector<size_t> candidates;
 	candidates.reserve(local_batch_size);
 
 	auto flush_candidates = [&]() {
@@ -521,7 +517,7 @@ namespace sbd {
 	  }
 	};
 
-	auto cdet = det[0];
+	std::vector<size_t> cdet = det[0];
 
 	if(pair_begin < pair_end) {
 	  size_t ia = static_cast<size_t>(
@@ -676,8 +672,8 @@ namespace sbd {
     /**
        @brief Global heatbah expansion
      */
-    template <typename ElemT, typename RealT>
-    void HeatbathExpansion(const std::vector<std::vector<size_t>> & det,
+    template <typename ElemT, typename RealT, typename DetsContainer>
+    void HeatbathExpansion(const DetsContainer & det,
 			   const std::vector<ElemT> & w,
 			   size_t bit_length,
 			   size_t norb,
@@ -687,7 +683,7 @@ namespace sbd {
 			   int type,
 			   RealT cutoff,
 			   size_t max_batch_size,
-			   std::vector<std::vector<size_t>> & edet,
+			   sbd::det_vector<size_t> & edet,
 			   MPI_Comm b_comm,
 			   MPI_Comm comm) {
 
@@ -705,14 +701,14 @@ namespace sbd {
       size_t i_end   = det.size();
       get_mpi_range(mpi_size_x,mpi_rank_x,i_begin,i_end);
 
-      std::vector<std::vector<size_t>> xdet(det.begin()+i_begin,det.begin()+i_end);
+      sbd::det_vector<size_t> xdet(det.begin() + i_begin, det.begin() + i_end);
       edet.clear();
 
       if( type == 0 ) {
 	local_heatbath_expansion(xdet,w,bit_length,norb,I0,I1,I2,cutoff,max_batch_size,edet);
       } else if( type == 1 ) {
-	std::vector<std::vector<size_t>> adet;
-	std::vector<std::vector<size_t>> bdet;
+	sbd::det_vector<size_t, sbd::det_kind::half> adet;
+	sbd::det_vector<size_t, sbd::det_kind::half> bdet;
 	std::vector<size_t> adet_count;
 	std::vector<size_t> bdet_count;
 	getHalfDets(xdet,bit_length,norb,
