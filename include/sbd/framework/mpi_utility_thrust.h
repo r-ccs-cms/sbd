@@ -19,7 +19,7 @@
 namespace sbd
 {
 
-#ifdef SBD_THRUST_SAFE_MPI_ALLREDUCE
+#ifdef SBD_NON_CUDA_AWARE_MPI
 
 template <typename ElemT>
 void MpiAllreduce(thrust::device_vector<ElemT> &A, MPI_Op op, MPI_Comm comm)
@@ -59,7 +59,7 @@ void MpiAllreduce(thrust::device_vector<ElemT> &A, MPI_Op op, MPI_Comm comm)
 #endif
 }
 
-#endif // SBD_THRUST_SAFE_MPI_ALLREDUCE
+#endif // SBD_NON_CUDA_AWARE_MPI
 
 template <typename ElemT>
 void _MpiSlide(const ElemT* A,
@@ -100,6 +100,20 @@ void _MpiSlide(const ElemT* A,
     std::vector<MPI_Status> sta_data(2);
 
     MPI_Datatype DataT = GetMpiType<ElemT>::MpiT;
+#ifdef SBD_NON_CUDA_AWARE_MPI
+    std::vector<ElemT> h_send(send_size), h_recv(recv_size);
+    if (send_size != 0) {
+        cudaMemcpy(h_send.data(), A, send_size * sizeof(ElemT), cudaMemcpyDefault);
+    }
+    if( send_size != 0 ) {
+        SBD_NVTX_RANGE_COLOR("MPI_Isend", 0);
+        MPI_Isend(h_send.data(),send_size,DataT,mpi_dest,1,comm,&req_data[0]);
+    }
+    if( recv_size != 0 ) {
+        SBD_NVTX_RANGE_COLOR("MPI_Irecv", 0);
+        MPI_Irecv(h_recv.data(),recv_size,DataT,mpi_source,1,comm,&req_data[1]);
+    }
+#else
     if( send_size != 0 ) {
         SBD_NVTX_RANGE_COLOR("MPI_Isend", 0);
         MPI_Isend(A,send_size,DataT,mpi_dest,1,comm,&req_data[0]);
@@ -108,6 +122,7 @@ void _MpiSlide(const ElemT* A,
         SBD_NVTX_RANGE_COLOR("MPI_Irecv", 0);
         MPI_Irecv((ElemT*)thrust::raw_pointer_cast(B.data()),recv_size,DataT,mpi_source,1,comm,&req_data[1]);
     }
+#endif
 
     if( send_size != 0 && recv_size != 0 ) {
         SBD_NVTX_RANGE_COLOR("MPI_Waitall", 0);
@@ -119,6 +134,11 @@ void _MpiSlide(const ElemT* A,
         SBD_NVTX_RANGE_COLOR("MPI_Waitall", 0);
         MPI_Waitall(1,&req_data[1],&sta_data[1]);
     }
+#ifdef SBD_NON_CUDA_AWARE_MPI
+    if (recv_size != 0) {
+        thrust::copy(h_recv.begin(), h_recv.end(), B.begin());
+    }
+#endif
 }
 
 template <typename ElemT>
@@ -170,12 +190,25 @@ void MpiSlide(const thrust::device_vector<size_t> & A,
     std::vector<MPI_Status> sta_data(2);
 
     MPI_Datatype DataT = SBD_MPI_SIZE_T;
+#ifdef SBD_NON_CUDA_AWARE_MPI
+    std::vector<size_t> h_send(send_size), h_recv(recv_size);
+    if (send_size != 0) {
+        thrust::copy(A.begin(), A.end(), h_send.begin());
+    }
+    if( send_size != 0 ) {
+        MPI_Isend(h_send.data(),send_size,DataT,mpi_dest,1,comm,&req_data[0]);
+    }
+    if( recv_size != 0 ) {
+        MPI_Irecv(h_recv.data(),recv_size,DataT,mpi_source,1,comm,&req_data[1]);
+    }
+#else
     if( send_size != 0 ) {
         MPI_Isend((size_t*)thrust::raw_pointer_cast(A.data()),send_size,DataT,mpi_dest,1,comm,&req_data[0]);
     }
     if( recv_size != 0 ) {
         MPI_Irecv((size_t*)thrust::raw_pointer_cast(B.data()),recv_size,DataT,mpi_source,1,comm,&req_data[1]);
     }
+#endif
 
     if( send_size != 0 && recv_size != 0 ) {
         MPI_Waitall(2,req_data.data(),sta_data.data());
@@ -184,6 +217,11 @@ void MpiSlide(const thrust::device_vector<size_t> & A,
     } else if ( send_size == 0 && recv_size != 0 ) {
         MPI_Waitall(1,&req_data[1],&sta_data[1]);
     }
+#ifdef SBD_NON_CUDA_AWARE_MPI
+    if (recv_size != 0) {
+        thrust::copy(h_recv.begin(), h_recv.end(), B.begin());
+    }
+#endif
 }
 
 
@@ -242,12 +280,25 @@ void _Mpi2dSlide(const ElemT* A,
     std::vector<MPI_Status> sta_data(2);
 
     MPI_Datatype DataT = GetMpiType<ElemT>::MpiT;
+#ifdef SBD_NON_CUDA_AWARE_MPI
+    std::vector<ElemT> h_send(send_size), h_recv(recv_size);
+    if (send_size != 0) {
+        cudaMemcpy(h_send.data(), A, send_size * sizeof(ElemT), cudaMemcpyDefault);
+    }
+    if (send_size != 0) {
+        MPI_Isend(h_send.data(), send_size, DataT, mpi_dist, 1, comm, &req_data[0]);
+    }
+    if (recv_size != 0) {
+        MPI_Irecv(h_recv.data(), recv_size, DataT, mpi_source, 1, comm, &req_data[1]);
+    }
+#else
     if (send_size != 0) {
         MPI_Isend(A, send_size, DataT, mpi_dist, 1, comm, &req_data[0]);
     }
     if (recv_size != 0) {
         MPI_Irecv((ElemT*)thrust::raw_pointer_cast(B.data()), recv_size, DataT, mpi_source, 1, comm, &req_data[1]);
     }
+#endif
 
     if (send_size != 0 && recv_size != 0) {
         MPI_Waitall(2, req_data.data(), sta_data.data());
@@ -258,6 +309,11 @@ void _Mpi2dSlide(const ElemT* A,
     else if (send_size == 0 && recv_size != 0) {
         MPI_Waitall(1, &req_data[1], &sta_data[1]);
     }
+#ifdef SBD_NON_CUDA_AWARE_MPI
+    if (recv_size != 0) {
+        thrust::copy(h_recv.begin(), h_recv.end(), B.begin());
+    }
+#endif
 }
 
 template <typename ElemT>
@@ -295,11 +351,19 @@ protected:
     MPI_Request req_recv;
     size_t send_size;
     size_t recv_size;
+#ifdef SBD_NON_CUDA_AWARE_MPI
+    std::vector<ElemT> h_send_buf;
+    std::vector<ElemT> h_recv_buf;
+    thrust::device_vector<ElemT>* p_B;
+#endif
 public:
     Mpi2dSlider()
     {
         send_size = 0;
         recv_size = 0;
+#ifdef SBD_NON_CUDA_AWARE_MPI
+        p_B = nullptr;
+#endif
     }
 
     void ExchangeAsync(const thrust::device_vector<ElemT> &A,
@@ -359,6 +423,23 @@ public:
         B.resize(recv_size);
 
         MPI_Datatype DataT = GetMpiType<ElemT>::MpiT;
+#ifdef SBD_NON_CUDA_AWARE_MPI
+        h_send_buf.resize(send_size);
+        h_recv_buf.resize(recv_size);
+        p_B = &B;
+        if (send_size != 0) {
+            cudaMemcpy(h_send_buf.data(), thrust::raw_pointer_cast(A.data()),
+                       send_size * sizeof(ElemT), cudaMemcpyDefault);
+        }
+        if (send_size != 0) {
+            SBD_NVTX_RANGE_COLOR("MPI_Isend", 0);
+            MPI_Isend(h_send_buf.data(), send_size, DataT, mpi_dist, task * 2 + 1, comm, &req_send);
+        }
+        if (recv_size != 0) {
+            SBD_NVTX_RANGE_COLOR("MPI_Irecv", 0);
+            MPI_Irecv(h_recv_buf.data(), recv_size, DataT, mpi_source, task * 2 + 1, comm, &req_recv);
+        }
+#else
         if (send_size != 0) {
             SBD_NVTX_RANGE_COLOR("MPI_Isend", 0);
             MPI_Isend((ElemT*)thrust::raw_pointer_cast(A.data()), send_size, DataT, mpi_dist, task * 2 + 1, comm, &req_send);
@@ -367,6 +448,7 @@ public:
             SBD_NVTX_RANGE_COLOR("MPI_Irecv", 0);
             MPI_Irecv((ElemT*)thrust::raw_pointer_cast(B.data()), recv_size, DataT, mpi_source, task * 2 + 1, comm, &req_recv);
         }
+#endif
     }
 
     bool Sync(MPI_Comm comm)
@@ -383,6 +465,9 @@ public:
             SBD_NVTX_RANGE_COLOR("MPI_Wait", 0);
             MPI_Wait(&req_recv, &st);
             recv = true;
+#ifdef SBD_NON_CUDA_AWARE_MPI
+            thrust::copy(h_recv_buf.begin(), h_recv_buf.end(), p_B->begin());
+#endif
         }
         {
             SBD_NVTX_RANGE_COLOR("MPI_Barrier", 0);
