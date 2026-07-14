@@ -139,14 +139,14 @@ namespace sbd {
     void diag(const MPI_Comm & comm,
 	      const SBD & sbd_data,
 	      const sbd::FCIDump & fcidump,
-	      const std::vector<std::vector<size_t>> & adet,
-	      const std::vector<std::vector<size_t>> & bdet,
+	      const det_vector<size_t, det_kind::half> & adet,
+	      const det_vector<size_t, det_kind::half> & bdet,
 	      const std::string & loadname,
 	      const std::string & savename,
 	      double & energy,
 	      std::vector<double> & density,
-	      std::vector<std::vector<size_t>> & co_adet,
-	      std::vector<std::vector<size_t>> & co_bdet,
+	      det_vector<size_t, det_kind::half> & co_adet,
+	      det_vector<size_t, det_kind::half> & co_bdet,
 	      std::vector<std::vector<double>> & one_p_rdm,
 	      std::vector<std::vector<double>> & two_p_rdm) {
 
@@ -718,8 +718,8 @@ namespace sbd {
 	  }
 	}
 	if( sbd_data.carryover_type == 2 ) {
-	  std::vector<std::vector<size_t>> res_adet;
-	  std::vector<std::vector<size_t>> res_bdet;
+	  det_vector<size_t, det_kind::half> res_adet;
+	  det_vector<size_t, det_kind::half> res_bdet;
 	  sbd::SinglesExtendHalfdets(co_adet,co_bdet,bit_length,L,
 				     adet_comm_size,bdet_comm_size,b_comm,
 				     res_adet,res_bdet);
@@ -786,8 +786,8 @@ namespace sbd {
 	      const std::string & savename,
 	      double & energy,
 	      std::vector<double> & density,
-	      std::vector<std::vector<size_t>> & co_adet,
-	      std::vector<std::vector<size_t>> & co_bdet,
+	      det_vector<size_t, det_kind::half> & co_adet,
+	      det_vector<size_t, det_kind::half> & co_bdet,
 	      std::vector<std::vector<double>> & one_p_rdm,
 	      std::vector<std::vector<double>> & two_p_rdm) {
 
@@ -821,8 +821,8 @@ namespace sbd {
        */
 
       int do_shuffle = sbd_data.do_shuffle;
-      std::vector<std::vector<size_t>> adet;
-      std::vector<std::vector<size_t>> bdet;
+      det_vector<size_t, det_kind::half> adet;
+      det_vector<size_t, det_kind::half> bdet;
 
       if( mpi_rank == 0 ) {
 	sbd::LoadAlphaDets(adetfile,adet,sbd_data.bit_length,L);

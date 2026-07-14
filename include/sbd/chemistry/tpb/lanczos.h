@@ -168,8 +168,8 @@ namespace sbd {
   template <typename ElemT, typename RealT>
   void Lanczos(const std::vector<ElemT> & hii,
 	       std::vector<ElemT> & W,
-	       const std::vector<std::vector<size_t>> & adets,
-	       const std::vector<std::vector<size_t>> & bdets,
+	       const det_vector<size_t, det_kind::half> & adets,
+	       const det_vector<size_t, det_kind::half> & bdets,
 	       const size_t bit_length,
 	       const size_t norbs,
 	       const size_t adet_comm_size,

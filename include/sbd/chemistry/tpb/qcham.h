@@ -8,8 +8,8 @@
 namespace sbd {
 
   template <typename ElemT>
-  void makeQCham(const std::vector<std::vector<size_t>> & adets,
-		 const std::vector<std::vector<size_t>> & bdets,
+  void makeQCham(const det_vector<size_t, det_kind::half> & adets,
+		 const det_vector<size_t, det_kind::half> & bdets,
 		 const size_t bit_length,
 		 const size_t norbs,
 		 const std::vector<TaskHelpers> & helper,
@@ -287,8 +287,8 @@ namespace sbd {
   } // end function
 
   template <typename ElemT>
-  void makeQChamDiagTerms(const std::vector<std::vector<size_t>> & adets,
-			  const std::vector<std::vector<size_t>> & bdets,
+  void makeQChamDiagTerms(const det_vector<size_t, det_kind::half> & adets,
+			  const det_vector<size_t, det_kind::half> & bdets,
 			  const size_t bit_length,
 			  const size_t norbs,
 			  const std::vector<TaskHelpers> & helper,

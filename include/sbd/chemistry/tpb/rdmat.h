@@ -61,14 +61,14 @@ namespace sbd {
 
   template <typename ElemT, typename RealT>
   void CarryOverAdet(const std::vector<ElemT> & W,
-		     const std::vector<std::vector<size_t>> & adet,
-		     const std::vector<std::vector<size_t>> & bdet,
+		     const det_vector<size_t, det_kind::half> & adet,
+		     const det_vector<size_t, det_kind::half> & bdet,
 		     const size_t adet_comm_size,
 		     const size_t bdet_comm_size,
 		     MPI_Comm b_comm,
-		     std::vector<std::vector<size_t>> & rdet,
+		     det_vector<size_t, det_kind::half> & rdet,
 		     RealT threshold) {
-    
+
     size_t adet_size = adet.size();
     size_t bdet_size = bdet.size();
     std::vector<RealT> D(adet_size);
@@ -80,7 +80,7 @@ namespace sbd {
 	      [&](int i, int j) {
 		return D[i] > D[j];
 	      });
-    
+
     std::vector<RealT> S(adet_size);
 
     RealT sum = 0.0;
@@ -100,15 +100,15 @@ namespace sbd {
 
   template <typename ElemT, typename RealT>
   void CarryOverAdet(const std::vector<ElemT> & W,
-		     const std::vector<std::vector<size_t>> & adet,
-		     const std::vector<std::vector<size_t>> & bdet,
+		     const det_vector<size_t, det_kind::half> & adet,
+		     const det_vector<size_t, det_kind::half> & bdet,
 		     const size_t adet_comm_size,
 		     const size_t bdet_comm_size,
 		     MPI_Comm b_comm,
 		     size_t kept,
-		     std::vector<std::vector<size_t>> & rdet,
+		     det_vector<size_t, det_kind::half> & rdet,
 		     RealT & discarted_weight) {
-    
+
     size_t adet_size = adet.size();
     size_t bdet_size = bdet.size();
     std::vector<RealT> D(adet_size);
@@ -120,7 +120,7 @@ namespace sbd {
 	      [&](int i, int j) {
 		return D[i] > D[j];
 	      });
-    
+
     rdet.resize(kept,std::vector<size_t>(adet[0].size()));
     for(size_t k=0; k < kept; k++) {
       rdet[k] = adet[sortIdx[k]];
@@ -185,16 +185,16 @@ namespace sbd {
     MPI_Comm_free(&bdet_comm);
   }
 
-  template <typename ElemT, typename RealT>
+  template <typename ElemT, typename RealT, typename Container>
   void CarryOverBdet(const std::vector<ElemT> & W,
-		     const std::vector<std::vector<size_t>> & adet,
-		     const std::vector<std::vector<size_t>> & bdet,
+		     const Container & adet,
+		     const Container & bdet,
 		     const size_t adet_comm_size,
 		     const size_t bdet_comm_size,
 		     MPI_Comm b_comm,
-		     std::vector<std::vector<size_t>> & rdet,
+		     Container & rdet,
 		     RealT threshold) {
-    
+
     size_t adet_size = adet.size();
     size_t bdet_size = bdet.size();
     std::vector<RealT> D(bdet_size);
@@ -206,9 +206,8 @@ namespace sbd {
 	      [&](int i, int j) {
 		return D[i] > D[j];
 	      });
-    
-    std::vector<RealT> S(bdet_size);
 
+    std::vector<RealT> S(bdet_size);
     RealT sum = 0.0;
     for(size_t i=0; i < bdet_size; i++) {
       sum += D[sortIdx[i]];
@@ -224,17 +223,17 @@ namespace sbd {
     }
   }
 
-  template <typename ElemT, typename RealT>
+  template <typename ElemT, typename RealT, typename Container>
   void CarryOverBdet(const std::vector<ElemT> & W,
-		     const std::vector<std::vector<size_t>> & adet,
-		     const std::vector<std::vector<size_t>> & bdet,
+		     const Container & adet,
+		     const Container & bdet,
 		     const size_t adet_comm_size,
 		     const size_t bdet_comm_size,
 		     MPI_Comm b_comm,
 		     size_t kept,
-		     std::vector<std::vector<size_t>> & rdet,
+		     Container & rdet,
 		     RealT & discarted_weight) {
-    
+
     size_t adet_size = adet.size();
     size_t bdet_size = bdet.size();
     std::vector<RealT> D(bdet_size);
@@ -246,12 +245,12 @@ namespace sbd {
 	      [&](int i, int j) {
 		return D[i] > D[j];
 	      });
-    
+
     rdet.resize(kept,std::vector<size_t>(bdet[0].size()));
     for(size_t k=0; k < kept; k++) {
       rdet[k] = bdet[sortIdx[k]];
     }
-    
+
     RealT sum = 0.0;
     for(size_t i=0; i < kept; i++) {
       sum += D[sortIdx[i]];

@@ -57,8 +57,8 @@ public:
     MultTPBThrust() {}
 
     void Init(
-        const std::vector<std::vector<size_t>> &adets_in,
-        const std::vector<std::vector<size_t>> &bdets_in,
+        const det_vector<size_t, det_kind::half> &adets_in,
+        const det_vector<size_t, det_kind::half> &bdets_in,
         const uint32_t bit_length_in,
         const size_t norbs_in,
         const size_t adet_comm_size_in,
@@ -97,8 +97,8 @@ public:
 // contructor for Mult data
 template <typename ElemT>
 void MultTPBThrust<ElemT>::Init(
-    const std::vector<std::vector<size_t>> &adets_in,
-    const std::vector<std::vector<size_t>> &bdets_in,
+    const det_vector<size_t, det_kind::half> &adets_in,
+    const det_vector<size_t, det_kind::half> &bdets_in,
     const uint32_t bit_length_in,
     const size_t norbs_in,
     const size_t adet_comm_size_in,

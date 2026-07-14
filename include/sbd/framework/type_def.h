@@ -79,6 +79,7 @@ namespace sbd {
 #else
    #error SIZE_MAX
 #endif
+  template<> inline MPI_Datatype GetMpiType<size_t>::MpiT = SBD_MPI_SIZE_T;
 
 } // end namespace sbd
 #endif // end SBD_FRAMEWORK_TYPE_DEF_H
