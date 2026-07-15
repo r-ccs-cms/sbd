@@ -64,6 +64,11 @@ TEST_EXECS = $(TEST_SOURCES:.cc=)
 
 all: $(TEST_EXECS)
 
+# Standalone RDM (--rdm 1) regression test: no BLAS/LAPACK needed.
+test_gpu_rdm_correlation: test_gpu_rdm_correlation.cc
+	@echo "[CXX]  $<"
+	$(Q)$(CXX) $(CXXFLAGS) -o $@ $< -fopenmp
+
 # Pattern rule for building test executables
 %: %.cc
 	@echo "[CXX]  $<"
@@ -104,7 +109,7 @@ test: $(TEST_EXECS)
 	fi
 
 # Individual test run targets (use test-<name> convention with hyphens)
-.PHONY: test-determinants test-inner-product test-gpu-correctness test-gpu-fe4s4-minimal
+.PHONY: test-determinants test-inner-product test-gpu-correctness test-gpu-fe4s4-minimal test-gpu-rdm-correlation
 
 test-determinants: test_determinants
 	@echo "Running test_determinants with $(MPI_LAUNCHER)..."
@@ -121,6 +126,10 @@ test-gpu-correctness: test_gpu_correctness
 test-gpu-fe4s4-minimal: test_gpu_fe4s4_minimal
 	@echo "Running test_gpu_fe4s4_minimal..."
 	@./test_gpu_fe4s4_minimal
+
+test-gpu-rdm-correlation: test_gpu_rdm_correlation
+	@echo "Running test_gpu_rdm_correlation..."
+	@./test_gpu_rdm_correlation
 
 clean:
 	$(Q)rm -f $(TEST_EXECS)
@@ -140,6 +149,7 @@ help:
 	@echo "  make test-inner-product     - Run test_inner_product only"
 	@echo "  make test-gpu-correctness   - Run test_gpu_correctness only"
 	@echo "  make test-gpu-fe4s4-minimal - Run test_gpu_fe4s4_minimal only"
+	@echo "  make test-gpu-rdm-correlation - Run RDM (--rdm 1) regression only"
 	@echo "  make clean                  - Remove executables"
 	@echo ""
 	@echo "GPU Support:"
