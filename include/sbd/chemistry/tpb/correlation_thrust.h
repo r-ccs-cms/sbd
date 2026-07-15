@@ -120,8 +120,40 @@ public:
         helper = h;
     }
 
+    __device__ inline void loop_body(size_t i, int64_t& braIdx) {
+        braIdx = -1;
+        size_t j = i / helper.size_single_beta;  // 0 .. size_single_alpha-1
+        size_t k = i % helper.size_single_beta;  // 0 .. size_single_beta-1
+        if (j >= helper.size_single_alpha) return;
+        size_t ia = helper.SinglesFromAlphaBraIndex[j];
+        size_t ja = helper.SinglesFromAlphaKetIndex[j];
+        size_t ib = helper.SinglesFromBetaBraIndex[k];
+        size_t jb = helper.SinglesFromBetaKetIndex[k];
+        braIdx = (ia - helper.braAlphaStart) * (helper.braBetaEnd - helper.braBetaStart) +
+                  ib - helper.braBetaStart;
+#ifndef SBD_USE_RANK_DISTRIBUTION
+        if( (braIdx % this->mpi_size_h) != this->mpi_rank_h ) return;
+#endif
+        size_t* DetI = this->det_I + ((ia - helper.braAlphaStart) * this->bdets_size + ib - helper.braBetaStart) * this->D_size;
+
+        size_t ketIdx = (ja - helper.ketAlphaStart) * (helper.ketBetaEnd - helper.ketBetaStart)
+                        + jb - helper.ketBetaStart;
+        ElemT WeightI = this->Wb[braIdx];
+        ElemT WeightJ = this->T[ketIdx];
+
+        this->correlation.TwoDiffCorrelation(DetI, WeightI, WeightJ,
+                            helper.SinglesAlphaCrAnSM[j], helper.SinglesBetaCrAnSM[k],
+                            helper.SinglesAlphaCrAnSM[j + helper.size_single_alpha], helper.SinglesBetaCrAnSM[k + helper.size_single_beta]);
+    }
+
     // kernel entry point
     __device__ __host__ void operator()(size_t i)
+    {
+        int64_t braIdx;
+        loop_body(i, braIdx);
+    }
+
+    /*__device__ __host__ void operator()(size_t i)
     {
         size_t j = i / helper.size_single_beta;
         size_t k = i - j * helper.size_single_beta;
@@ -144,8 +176,181 @@ public:
                                 helper.SinglesAlphaCrAnSM[j], helper.SinglesBetaCrAnSM[k],
                                 helper.SinglesAlphaCrAnSM[j + helper.size_single_alpha], helper.SinglesBetaCrAnSM[k + helper.size_single_beta]);
         }
+    }*/
+};
+
+template <typename ElemT>
+class CorrelationAlphaBeta_Vec : public CorrelationKernelBase<ElemT>
+{
+protected:
+    TaskHelpersThrust<ElemT> helper;
+public:
+    CorrelationAlphaBeta_Vec(const TaskHelpersThrust<ElemT>& h,
+                const MultTPBThrust<ElemT>& data,
+                const thrust::device_vector<ElemT>& v_wb,
+                const thrust::device_vector<ElemT>& v_t,
+                thrust::device_vector<ElemT>& b1,
+                thrust::device_vector<ElemT>& b2
+                ) : CorrelationKernelBase<ElemT>(data, v_wb, v_t, b1, b2)
+    {
+        helper = h;
+    }
+
+    __device__ inline void loop_body(size_t i, int64_t& braIdx) {
+        braIdx = -1;
+        size_t j = i / helper.size_single_beta;  // 0 .. size_single_alpha-1
+        size_t k = i % helper.size_single_beta;  // 0 .. size_single_beta-1
+        if (j >= helper.size_single_alpha) return;
+        size_t ia = helper.SinglesFromAlphaBraIndex[j];
+        size_t ja = helper.SinglesFromAlphaKetIndex[j];
+        size_t ib = helper.SinglesFromBetaBraIndex[k];
+        size_t jb = helper.SinglesFromBetaKetIndex[k];
+        braIdx = (ia - helper.braAlphaStart) * (helper.braBetaEnd - helper.braBetaStart) +
+                  ib - helper.braBetaStart;
+#ifndef SBD_USE_RANK_DISTRIBUTION
+        if( (braIdx % this->mpi_size_h) != this->mpi_rank_h ) return;
+#endif
+        size_t* DetI = this->det_I + ((ia - helper.braAlphaStart) * this->bdets_size + ib - helper.braBetaStart) * this->D_size;
+
+        size_t ketIdx = (ja - helper.ketAlphaStart) * (helper.ketBetaEnd - helper.ketBetaStart)
+                        + jb - helper.ketBetaStart;
+        ElemT WeightI = this->Wb[braIdx];
+        ElemT WeightJ = this->T[ketIdx];
+
+        this->correlation.TwoDiffCorrelation(DetI, WeightI, WeightJ,
+                            helper.SinglesAlphaCrAnSM[j], helper.SinglesBetaCrAnSM[k],
+                            helper.SinglesAlphaCrAnSM[j + helper.size_single_alpha], helper.SinglesBetaCrAnSM[k + helper.size_single_beta]);
+    }
+
+    // kernel entry point
+    __device__ __host__ void operator()(size_t i0)
+    {
+        size_t i = (VecLen * i0);
+        int64_t braIdx;
+        loop_body(i, braIdx);
+        for (size_t i1 = 1; i1 < VecLen; i1++) {
+            i = (VecLen * i0) + i1;
+            int64_t braIdx_new;
+            loop_body(i, braIdx_new);
+            braIdx = braIdx_new;
+        }
     }
 };
+
+
+#define SB_CORR_ALPHA 0
+#define SB_CORR_BETA  1
+#define SB_CORR_SINGLE 0
+#define SB_CORR_DOUBLE 1
+
+// MultUnified unifies multiple kernel variants into a single template-based
+// implementation, allowing shared application of optimizations (e.g., thread
+// coarsening) and avoiding code duplication across individual kernels.
+template <typename ElemT, int AlphaOrBeta, int SingleOrDouble>
+class CorrelationUnified : public CorrelationKernelBase<ElemT>
+{
+protected:
+    TaskHelpersThrust<ElemT> helper;
+public:
+    CorrelationUnified(const TaskHelpersThrust<ElemT>& h,
+                const thrust::device_vector<ElemT>& v_wb,
+                const thrust::device_vector<ElemT>& v_t,
+                const MultTPBThrust<ElemT>& data,
+                thrust::device_vector<ElemT>& b1,
+                thrust::device_vector<ElemT>& b2
+                ) : CorrelationKernelBase<ElemT>(data, v_wb, v_t, b1, b2)
+    {
+        helper = h;
+    }
+
+    __device__ inline void loop_body(size_t i, int64_t& braIdx) {
+        braIdx = -1;
+        size_t k;
+        size_t j;
+        size_t ia;
+        size_t ja;
+        size_t ib;
+        size_t jb;
+        if (AlphaOrBeta == SB_CORR_ALPHA) {
+            size_t braBetaSize = helper.braBetaEnd - helper.braBetaStart;
+            if (SingleOrDouble == SB_MULT_SINGLE) {
+                // SingleAlpha
+                k = i / helper.size_single_alpha;
+                j = i % helper.size_single_alpha;
+                ia = helper.SinglesFromAlphaBraIndex[j];
+                ja = helper.SinglesFromAlphaKetIndex[j];
+            } else {
+                // DoubleAlpha
+                k = i / helper.size_double_alpha;
+                j = i % helper.size_double_alpha;
+                ia = helper.DoublesFromAlphaBraIndex[j];
+                ja = helper.DoublesFromAlphaKetIndex[j];
+            }
+            ib = k + helper.braBetaStart;
+            jb = ib;
+            if (k >= braBetaSize) return;
+        } else {
+            size_t braAlphaSize = helper.braAlphaEnd - helper.braAlphaStart;
+            if (SingleOrDouble == SB_MULT_SINGLE) {
+                // SingleBeta
+                j = i / helper.size_single_beta;
+                k = i % helper.size_single_beta;
+                ib = helper.SinglesFromBetaBraIndex[k];
+                jb = helper.SinglesFromBetaKetIndex[k];
+            } else {
+                // DoubleBeta
+                j = i / helper.size_double_beta;
+                k = i % helper.size_double_beta;
+                ib = helper.DoublesFromBetaBraIndex[k];
+                jb = helper.DoublesFromBetaKetIndex[k];
+            }
+            ia = j + helper.braAlphaStart;
+            ja = ia;
+            if (j >= braAlphaSize) return;
+        }
+
+        braIdx = (ia - helper.braAlphaStart) * (helper.braBetaEnd - helper.braBetaStart)
+                + ib - helper.braBetaStart;
+#ifndef SBD_USE_RANK_DISTRIBUTION
+        if( (braIdx % this->mpi_size_h) != this->mpi_rank_h ) return;
+#endif
+        size_t* DetI = this->det_I + ((ia - helper.braAlphaStart) * this->bdets_size + ib - helper.braBetaStart) * this->D_size;
+        size_t ketIdx = (ja - helper.ketAlphaStart) * (helper.ketBetaEnd - helper.ketBetaStart)
+                        + jb - helper.ketBetaStart;
+        ElemT WeightI = this->Wb[braIdx];
+        ElemT WeightJ = this->T[ketIdx];
+        if (AlphaOrBeta == SB_CORR_ALPHA) {
+            if (SingleOrDouble == SB_CORR_SINGLE) {
+                // SingleAlpha
+                this->correlation.OneDiffCorrelation(DetI, WeightI, WeightJ, helper.SinglesAlphaCrAnSM[j], helper.SinglesAlphaCrAnSM[j + helper.size_single_alpha]);
+            } else {
+                // DoubleAlpha
+                this->correlation.TwoDiffCorrelation(DetI, WeightI, WeightJ,
+                                helper.DoublesAlphaCrAnSM[j], helper.DoublesAlphaCrAnSM[j + helper.size_double_alpha],
+                                helper.DoublesAlphaCrAnSM[j + 2 * helper.size_double_alpha], helper.DoublesAlphaCrAnSM[j + 3 * helper.size_double_alpha]);
+            }
+        } else {
+            if (SingleOrDouble == SB_MULT_SINGLE) {
+                // SingleBeta
+                this->correlation.OneDiffCorrelation(DetI, WeightI, WeightJ, helper.SinglesBetaCrAnSM[k], helper.SinglesBetaCrAnSM[k + helper.size_single_beta]);
+            } else {
+                // DoubleBeta
+                this->correlation.TwoDiffCorrelation(DetI, WeightI, WeightJ,
+                                        helper.DoublesBetaCrAnSM[k], helper.DoublesBetaCrAnSM[k + helper.size_double_beta],
+                                        helper.DoublesBetaCrAnSM[k + 2 * helper.size_double_beta], helper.DoublesBetaCrAnSM[k + 3 * helper.size_double_beta]);
+            }
+        }
+    }
+
+    // kernel entry point
+    __device__ void operator()(size_t i)
+    {
+        int64_t braIdx;
+        loop_body(i, braIdx);
+    }
+};
+
+
 
 
 template <typename ElemT>
@@ -176,15 +381,16 @@ public:
         size_t ib = k + helper.braBetaStart;
         size_t jb = ib;
         size_t braIdx = (ia - helper.braAlphaStart) * (helper.braBetaEnd - helper.braBetaStart) + ib - helper.braBetaStart;
-        if( (braIdx % this->mpi_size_h) == this->mpi_rank_h ) {
-            size_t ketIdx = (ja - helper.ketAlphaStart) * (helper.ketBetaEnd - helper.ketBetaStart)
-                            + jb - helper.ketBetaStart;
+#ifndef SBD_USE_RANK_DISTRIBUTION
+        if( (braIdx % this->mpi_size_h) != this->mpi_rank_h ) return;
+#endif
+        size_t ketIdx = (ja - helper.ketAlphaStart) * (helper.ketBetaEnd - helper.ketBetaStart)
+                        + jb - helper.ketBetaStart;
 
-            size_t* DetI = this->det_I + ((ia - helper.braAlphaStart) * this->bdets_size + ib - helper.braBetaStart) * this->D_size;
-            ElemT WeightI = this->Wb[braIdx];
-            ElemT WeightJ = this->T[ketIdx];
-            this->correlation.OneDiffCorrelation(DetI, WeightI, WeightJ, helper.SinglesAlphaCrAnSM[j], helper.SinglesAlphaCrAnSM[j + helper.size_single_alpha]);
-        }
+        size_t* DetI = this->det_I + ((ia - helper.braAlphaStart) * this->bdets_size + ib - helper.braBetaStart) * this->D_size;
+        ElemT WeightI = this->Wb[braIdx];
+        ElemT WeightJ = this->T[ketIdx];
+        this->correlation.OneDiffCorrelation(DetI, WeightI, WeightJ, helper.SinglesAlphaCrAnSM[j], helper.SinglesAlphaCrAnSM[j + helper.size_single_alpha]);
     }
 };
 
@@ -216,18 +422,19 @@ public:
         size_t ib = k + helper.braBetaStart;
         size_t jb = ib;
         size_t braIdx = (ia - helper.braAlphaStart) * (helper.braBetaEnd - helper.braBetaStart) + ib - helper.braBetaStart;
-        if( (braIdx % this->mpi_size_h) == this->mpi_rank_h ) {
-            size_t ketIdx = (ja - helper.ketAlphaStart) * (helper.ketBetaEnd - helper.ketBetaStart)
-                            + jb - helper.ketBetaStart;
+#ifndef SBD_USE_RANK_DISTRIBUTION
+        if( (braIdx % this->mpi_size_h) != this->mpi_rank_h ) return;
+#endif
+        size_t ketIdx = (ja - helper.ketAlphaStart) * (helper.ketBetaEnd - helper.ketBetaStart)
+                        + jb - helper.ketBetaStart;
 
-            size_t* DetI = this->det_I + ((ia - helper.braAlphaStart) * this->bdets_size + ib - helper.braBetaStart) * this->D_size;
-            ElemT WeightI = this->Wb[braIdx];
-            ElemT WeightJ = this->T[ketIdx];
+        size_t* DetI = this->det_I + ((ia - helper.braAlphaStart) * this->bdets_size + ib - helper.braBetaStart) * this->D_size;
+        ElemT WeightI = this->Wb[braIdx];
+        ElemT WeightJ = this->T[ketIdx];
 
-            this->correlation.TwoDiffCorrelation(DetI, WeightI, WeightJ,
-                                helper.DoublesAlphaCrAnSM[j], helper.DoublesAlphaCrAnSM[j + helper.size_double_alpha],
-                                helper.DoublesAlphaCrAnSM[j + 2 * helper.size_double_alpha], helper.DoublesAlphaCrAnSM[j + 3 * helper.size_double_alpha]);
-        }
+        this->correlation.TwoDiffCorrelation(DetI, WeightI, WeightJ,
+                            helper.DoublesAlphaCrAnSM[j], helper.DoublesAlphaCrAnSM[j + helper.size_double_alpha],
+                            helper.DoublesAlphaCrAnSM[j + 2 * helper.size_double_alpha], helper.DoublesAlphaCrAnSM[j + 3 * helper.size_double_alpha]);
     }
 };
 
@@ -259,15 +466,16 @@ public:
         size_t ib = helper.SinglesFromBetaBraIndex[k];
         size_t jb = helper.SinglesFromBetaKetIndex[k];
         size_t braIdx = (ia - helper.braAlphaStart) * (helper.braBetaEnd - helper.braBetaStart) + ib - helper.braBetaStart;
-        if( (braIdx % this->mpi_size_h) == this->mpi_rank_h ) {
-            size_t ketIdx = (ja - helper.ketAlphaStart) * (helper.ketBetaEnd - helper.ketBetaStart)
-                            + jb - helper.ketBetaStart;
+#ifndef SBD_USE_RANK_DISTRIBUTION
+        if( (braIdx % this->mpi_size_h) != this->mpi_rank_h ) return;
+#endif
+        size_t ketIdx = (ja - helper.ketAlphaStart) * (helper.ketBetaEnd - helper.ketBetaStart)
+                        + jb - helper.ketBetaStart;
 
-            size_t* DetI = this->det_I + ((ia - helper.braAlphaStart) * this->bdets_size + ib - helper.braBetaStart) * this->D_size;
-            ElemT WeightI = this->Wb[braIdx];
-            ElemT WeightJ = this->T[ketIdx];
-            this->correlation.OneDiffCorrelation(DetI, WeightI, WeightJ, helper.SinglesBetaCrAnSM[k], helper.SinglesBetaCrAnSM[k + helper.size_single_beta]);
-        }
+        size_t* DetI = this->det_I + ((ia - helper.braAlphaStart) * this->bdets_size + ib - helper.braBetaStart) * this->D_size;
+        ElemT WeightI = this->Wb[braIdx];
+        ElemT WeightJ = this->T[ketIdx];
+        this->correlation.OneDiffCorrelation(DetI, WeightI, WeightJ, helper.SinglesBetaCrAnSM[k], helper.SinglesBetaCrAnSM[k + helper.size_single_beta]);
     }
 };
 
@@ -299,18 +507,19 @@ public:
         size_t ib = helper.DoublesFromBetaBraIndex[k];
         size_t jb = helper.DoublesFromBetaKetIndex[k];
         size_t braIdx = (ia - helper.braAlphaStart) * (helper.braBetaEnd - helper.braBetaStart) + ib - helper.braBetaStart;
-        if( (braIdx % this->mpi_size_h) == this->mpi_rank_h ) {
-            size_t ketIdx = (ja - helper.ketAlphaStart) * (helper.ketBetaEnd - helper.ketBetaStart)
-                            + jb - helper.ketBetaStart;
+#ifndef SBD_USE_RANK_DISTRIBUTION
+        if( (braIdx % this->mpi_size_h) != this->mpi_rank_h ) return;
+#endif
+        size_t ketIdx = (ja - helper.ketAlphaStart) * (helper.ketBetaEnd - helper.ketBetaStart)
+                        + jb - helper.ketBetaStart;
 
-            size_t* DetI = this->det_I + ((ia - helper.braAlphaStart) * this->bdets_size + ib - helper.braBetaStart) * this->D_size;
-            ElemT WeightI = this->Wb[braIdx];
-            ElemT WeightJ = this->T[ketIdx];
+        size_t* DetI = this->det_I + ((ia - helper.braAlphaStart) * this->bdets_size + ib - helper.braBetaStart) * this->D_size;
+        ElemT WeightI = this->Wb[braIdx];
+        ElemT WeightJ = this->T[ketIdx];
 
-            this->correlation.TwoDiffCorrelation(DetI, WeightI, WeightJ,
-                                        helper.DoublesBetaCrAnSM[k], helper.DoublesBetaCrAnSM[k + helper.size_double_beta],
-                                        helper.DoublesBetaCrAnSM[k + 2 * helper.size_double_beta], helper.DoublesBetaCrAnSM[k + 3 * helper.size_double_beta]);
-        }
+        this->correlation.TwoDiffCorrelation(DetI, WeightI, WeightJ,
+                                    helper.DoublesBetaCrAnSM[k], helper.DoublesBetaCrAnSM[k + helper.size_double_beta],
+                                    helper.DoublesBetaCrAnSM[k + 2 * helper.size_double_beta], helper.DoublesBetaCrAnSM[k + 3 * helper.size_double_beta]);
     }
 };
 
@@ -559,7 +768,10 @@ void MultTPBThrust<ElemT>::correlation(const std::vector<ElemT> &W_in,
             kernel.set_mpi_size(mpi_rank_h, mpi_size_h);
 
             auto ci = thrust::counting_iterator<size_t>(0);
-            thrust::for_each_n(thrust::device, ci, size, kernel);
+            {
+                SBD_NVTX_RANGE_COLOR("thrust::for_each_n", __LINE__);
+                thrust::for_each_n(thrust::device, ci, size, kernel);
+            }
         } else {
             size = braAlphaSize * braBetaSize;
             if (use_precalculated_dets) {
@@ -593,49 +805,63 @@ void MultTPBThrust<ElemT>::correlation(const std::vector<ElemT> &W_in,
             // precalculate DetI (if update needed)
             UpdateDet(task);
 
-            if (helper[task].taskType == 2) { // beta range are same
+            if (helper[task].taskType == 2) {
+                // SingleAlpha
                 size = helper[task].size_single_alpha * braBetaSize;
                 CorrelationSingleAlpha single_kernel(helper[task], *this, W, T, onebody, twobody);
                 single_kernel.set_mpi_size(mpi_rank_h, mpi_size_h);
-
                 auto cis = thrust::counting_iterator<size_t>(0);
-                thrust::for_each_n(thrust::device, cis, size, single_kernel);
+                {
+                    SBD_NVTX_RANGE_COLOR("thrust::for_each_n", __LINE__);
+                    thrust::for_each_n(thrust::device, cis, size, single_kernel);
+                }
 
+                // DoubleAlpha
                 size = helper[task].size_double_alpha * braBetaSize;
                 CorrelationDoubleAlpha double_kernel(helper[task], *this, W, T, onebody, twobody);
                 double_kernel.set_mpi_size(mpi_rank_h, mpi_size_h);
-
                 auto cid = thrust::counting_iterator<size_t>(0);
-                thrust::for_each_n(thrust::device, cid, size, double_kernel);
-            }
-            else if (helper[task].taskType == 1) {
+                {
+                    SBD_NVTX_RANGE_COLOR("thrust::for_each_n", __LINE__);
+                    thrust::for_each_n(thrust::device, cid, size, double_kernel);
+                }
+            } else if(helper[task].taskType == 1) {
+                // SingleBeta
                 size = helper[task].size_single_beta * braAlphaSize;
                 CorrelationSingleBeta single_kernel(helper[task], *this, W, T, onebody, twobody);
                 single_kernel.set_mpi_size(mpi_rank_h, mpi_size_h);
-
                 auto cis = thrust::counting_iterator<size_t>(0);
-                thrust::for_each_n(thrust::device, cis, size, single_kernel);
+                {
+                    SBD_NVTX_RANGE_COLOR("thrust::for_each_n", __LINE__);
+                    thrust::for_each_n(thrust::device, cis, size, single_kernel);
+                }
 
+                // DoubleBeta
                 size = helper[task].size_double_beta * braAlphaSize;
                 CorrelationDoubleBeta double_kernel(helper[task], *this, W, T, onebody, twobody);
                 double_kernel.set_mpi_size(mpi_rank_h, mpi_size_h);
-
                 auto cid = thrust::counting_iterator<size_t>(0);
-                thrust::for_each_n(thrust::device, cid, size, double_kernel);
+                {
+                    SBD_NVTX_RANGE_COLOR("thrust::for_each_n", __LINE__);
+                    thrust::for_each_n(thrust::device, cid, size, double_kernel);
+                }
             } else {
+                //
                 size = helper[task].size_single_alpha * helper[task].size_single_beta;
                 CorrelationAlphaBeta kernel(helper[task], *this, W, T, onebody, twobody);
                 kernel.set_mpi_size(mpi_rank_h, mpi_size_h);
-
                 auto ci = thrust::counting_iterator<size_t>(0);
-                thrust::for_each_n(thrust::device, ci, size, kernel);
+                {
+                    SBD_NVTX_RANGE_COLOR("thrust::for_each_n", __LINE__);
+                    thrust::for_each_n(thrust::device, ci, size, kernel);
+                }
             }
         } else {    // no collapse
             size = braAlphaSize * braBetaSize;
             if (use_precalculated_dets) {
                 num_max_threads = size;
                 // precalculate DetI (if update needed)
-                UpdateDet(0);
+                UpdateDet(task);
             }
 
             if (helper[task].taskType == 2) {

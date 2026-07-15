@@ -40,7 +40,7 @@ namespace sbd {
 template <typename T>
 __host__ __device__ inline void atomic_add(T* p, T v)
 {
-#ifdef __CUDA_ARCH__
+#ifdef __CUDACC__
     atomicAdd(p, v);
 #else
     *p += v;
@@ -50,7 +50,7 @@ __host__ __device__ inline void atomic_add(T* p, T v)
 template <>
 __host__ __device__ inline void atomic_add(std::complex<double>* p, std::complex<double> v)
 {
-#ifdef __CUDA_ARCH__
+#ifdef __CUDACC__
     atomicAdd(reinterpret_cast<double*>(p),     v.real());
     atomicAdd(reinterpret_cast<double*>(p) + 1, v.imag());
 #else
@@ -61,7 +61,7 @@ __host__ __device__ inline void atomic_add(std::complex<double>* p, std::complex
 // Overload: add a real value to the real part of a complex accumulator.
 __host__ __device__ inline void atomic_add_real(std::complex<double>* p, double v)
 {
-#ifdef __CUDA_ARCH__
+#ifdef __CUDACC__
     atomicAdd(reinterpret_cast<double*>(p), v);
 #else
     *p += std::complex<double>(v, 0.0);
@@ -71,7 +71,7 @@ __host__ __device__ inline void atomic_add_real(std::complex<double>* p, double 
 // Overload for real types (no-op specialisation needed to avoid ambiguity).
 __host__ __device__ inline void atomic_add_real(double* p, double v)
 {
-#ifdef __CUDA_ARCH__
+#ifdef __CUDACC__
     atomicAdd(p, v);
 #else
     *p += v;
