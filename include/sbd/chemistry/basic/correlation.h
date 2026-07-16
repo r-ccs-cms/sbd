@@ -32,7 +32,7 @@ namespace sbd {
 	int oj = closed.at(j)/2;
 	int sj = closed.at(j)%2;
 #pragma omp atomic update
-	twobody[sj+2*si][oj+norb*oi+norb*norb*oj+norb*norb*norb*oi]
+	twobody[si+2*sj][oi+norb*oj+norb*norb*oi+norb*norb*norb*oj]
 	  += SquaredNorm(WeightI);
 #pragma omp atomic update
 	twobody[sj+2*si][oj+norb*oi+norb*norb*oj+norb*norb*norb*oi]
