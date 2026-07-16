@@ -369,8 +369,8 @@ namespace sbd {
 	     h_comm,b_comm,t_comm);
 	ElemT E;
 	InnerProduct(w,v,E,b_comm);
-	energy = GetReal(E);
 #endif
+	energy = GetReal(E);
 	if( sbd_data.timing_barriers ) MPI_Barrier(comm);
 	auto time_end_mult = std::chrono::high_resolution_clock::now();
 	auto elapsed_mult_count = std::chrono::duration_cast<std::chrono::microseconds>(time_end_mult-time_start_mult).count();
