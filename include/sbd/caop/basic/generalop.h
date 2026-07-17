@@ -14,6 +14,19 @@ namespace sbd {
   template <typename ElemT>
   class GeneralOp;
 
+#ifdef SBD_THRUST
+  template <typename ElemT_> class CaopMultThrust;
+  template <typename ElemT_>
+  void InitCaopMultThrust(CaopMultThrust<ElemT_>& driver,
+                           const std::vector<ElemT_>& hd,
+                           const det_vector<size_t>& bs,
+                           int bit_length,
+                           const GeneralOp<ElemT_>& H,
+                           bool sign,
+                           const std::vector<int>& slide,
+                           MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm);
+#endif
+
   class CAOp {
   public:
     CAOp()
@@ -88,6 +101,17 @@ namespace sbd {
 		     MPI_Comm h_comm,
 		     MPI_Comm b_comm,
 		     MPI_Comm t_comm);
+#ifdef SBD_THRUST
+    template <typename ElemT_>
+    friend void InitCaopMultThrust(CaopMultThrust<ElemT_>& driver,
+                                    const std::vector<ElemT_>& hd,
+                                    const det_vector<size_t>& bs,
+                                    int bit_length,
+                                    const GeneralOp<ElemT_>& H,
+                                    bool sign,
+                                    const std::vector<int>& slide,
+                                    MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm);
+#endif
 
     template <typename ElemT_>
     friend void makeCAOpHamDiagTerms(const det_vector<size_t> & bs,
@@ -338,6 +362,17 @@ namespace sbd {
 		     MPI_Comm h_comm,
 		     MPI_Comm b_comm,
 		     MPI_Comm t_comm);
+#ifdef SBD_THRUST
+    template <typename ElemT_>
+    friend void InitCaopMultThrust(CaopMultThrust<ElemT_>& driver,
+                                    const std::vector<ElemT_>& hd,
+                                    const det_vector<size_t>& bs,
+                                    int bit_length,
+                                    const GeneralOp<ElemT_>& H,
+                                    bool sign,
+                                    const std::vector<int>& slide,
+                                    MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm);
+#endif
 
     template <typename ElemT_>
     friend void makeCAOpHamDiagTerms(const det_vector<size_t> & bs,
@@ -759,6 +794,17 @@ namespace sbd {
 		     MPI_Comm h_comm,
 		     MPI_Comm b_comm,
 		     MPI_Comm t_comm);
+#ifdef SBD_THRUST
+    template <typename ElemT_>
+    friend void InitCaopMultThrust(CaopMultThrust<ElemT_>& driver,
+                                    const std::vector<ElemT_>& hd,
+                                    const det_vector<size_t>& bs,
+                                    int bit_length,
+                                    const GeneralOp<ElemT_>& H,
+                                    bool sign,
+                                    const std::vector<int>& slide,
+                                    MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm);
+#endif
 
     template <typename ElemT_>
     friend void makeCAOpHamDiagTerms(const det_vector<size_t> & bs,

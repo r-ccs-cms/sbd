@@ -196,6 +196,23 @@ namespace sbd {
 	auto time_start_davidson = std::chrono::high_resolution_clock::now();
 	std::vector<ElemT> hii;
 	makeCAOpHamDiagTerms(basis,bit_length,slide,H,hii);
+#ifdef SBD_THRUST
+	// GPU path (method==0): driver owns GPU resources for the full Davidson+eval
+	// lifetime. InitCaopMultThrust() is safe to call again when H or basis
+	// changes between sbd::diag() calls (orbital optimization cycles).
+	CaopMultThrust<ElemT> device_mult;
+	if( method == 0 ) {
+	  InitCaopMultThrust(device_mult,hii,basis,bit_length,H,sign,
+			     slide,h_comm,b_comm,t_comm);
+	  Davidson(hii,W,device_mult,
+		   h_comm,b_comm,t_comm,
+		   max_it,max_nb,max_iv,eps,seed);
+	} else if ( method == 2 ) {
+	  Lanczos(hii,W,basis,bit_length,slide,H,sign,
+		  h_comm,b_comm,t_comm,
+		  max_it,max_nb,eps);
+	}
+#else
 	if( method == 0 ) {
 	  Davidson(hii,W,basis,bit_length,slide,H,sign,
 		   h_comm,b_comm,t_comm,
@@ -205,6 +222,7 @@ namespace sbd {
 		  h_comm,b_comm,t_comm,
 		  max_it,max_nb,eps);
 	}
+#endif
 	auto time_end_davidson = std::chrono::high_resolution_clock::now();
 	auto elapsed_davidson_count = std::chrono::duration_cast<std::chrono::microseconds>(time_end_davidson-time_start_davidson).count();
 	double elapsed_davidson = 0.000001 * elapsed_davidson_count;
@@ -223,8 +241,17 @@ namespace sbd {
 	 */
 	auto time_start_mult = std::chrono::high_resolution_clock::now();
 	std::vector<ElemT> C(W.size(),0.0);
+#ifdef SBD_THRUST
+	if( method == 0 ) {
+	  device_mult.run(W,C);
+	} else {
+	  mult(hii,W,C,basis,bit_length,slide,H,sign,
+	       h_comm,b_comm,t_comm);
+	}
+#else
 	mult(hii,W,C,basis,bit_length,slide,H,sign,
 	     h_comm,b_comm,t_comm);
+#endif
 	auto time_end_mult = std::chrono::high_resolution_clock::now();
 	auto elapsed_mult_count = std::chrono::duration_cast<std::chrono::microseconds>(time_end_mult-time_start_mult).count();
         double elapsed_mult = 0.000001 * elapsed_mult_count;

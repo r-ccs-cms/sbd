@@ -15,6 +15,7 @@ Included by mult.h when SBD_THRUST is defined. Same call signature as the CPU ve
 #include <algorithm>
 #include <vector>
 #include <cstring>
+#include <cassert>
 
 #include "sbd/caop/basic/generalop.h"
 #include "sbd/framework/det_vector.h"
@@ -433,9 +434,11 @@ public:
     }
 
     // Init: accepts pre-extracted GeneralOp data (m1/m2 as flat vectors,
-    // terms as CaopRawTerm, c as coefficient vector). The friend mult()
-    // function extracts these from GeneralOp and passes them here.
+    // terms as CaopRawTerm, c as coefficient vector). Extracts are done by
+    // InitCaopMultThrust() (friend of GeneralOp) and forwarded here.
     // Does NOT precompute tbs_seq — that happens lazily on the first run() call.
+    // Safe to call multiple times: resets all lazy state so run() re-initializes
+    // for the new problem (H or basis may have changed between calls).
     void Init(const std::vector<ElemT>& hd,
               const det_vector<size_t>& bs,
               int bit_length,
@@ -446,6 +449,22 @@ public:
               bool sign,
               const std::vector<int>& slide,
               MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm) {
+        // Reset lazy state so run() re-initializes for this problem.
+        tbs_initialized_ = false;
+        d_tbs_seq_.clear();
+        n_kets_per_task_.clear();
+        // Free persistent run() resources if previously allocated, so run()
+        // re-allocates them sized for the (possibly different) global_max_n_.
+        if (h_twk_[0] != nullptr) {
+            cudaFreeHost(h_twk_[0]); h_twk_[0] = nullptr;
+            cudaFreeHost(h_twk_[1]); h_twk_[1] = nullptr;
+            cudaEventDestroy(copy_done_[0]);
+            cudaEventDestroy(copy_done_[1]);
+            cudaEventDestroy(compute_done_[0]);
+            cudaEventDestroy(compute_done_[1]);
+            cudaStreamDestroy(copy_stream_);  copy_stream_  = nullptr;
+            cudaStreamDestroy(compute_stream_); compute_stream_ = nullptr;
+        }
         h_comm_ = h_comm; b_comm_ = b_comm; t_comm_ = t_comm;
         sign_   = sign;
         slide_  = slide;
@@ -582,6 +601,12 @@ public:
             tbs_initialized_ = true;
         }
 
+        // Verify mask sizes are consistent with elem_size_ set at Init().
+        assert((n_terms_ == 0 || elem_size_ == 0 ||
+                ((int)d_m1_.size() == n_terms_ * elem_size_ &&
+                 (int)d_m2_.size() == n_terms_ * elem_size_)) &&
+               "CaopMultThrust::run: mask size mismatch — elem_size_ changed after Init()");
+
         int mpi_size_h; MPI_Comm_size(h_comm_, &mpi_size_h);
         int mpi_rank_h; MPI_Comm_rank(h_comm_, &mpi_rank_h);
         int mpi_size_t; MPI_Comm_size(t_comm_, &mpi_size_t);
@@ -691,11 +716,47 @@ public:
 };
 
 // ============================================================
+// InitCaopMultThrust — extracts GeneralOp data and calls driver.Init().
+// Declared as a friend of GeneralOp / CAOp / ProductOp in generalop.h.
+// Callers (e.g. sbdiag.h method==0) own the CaopMultThrust lifetime and
+// call Init() again whenever H or basis changes between sbd::diag() calls.
+// ============================================================
+template <typename ElemT>
+void InitCaopMultThrust(CaopMultThrust<ElemT>& driver,
+                         const std::vector<ElemT>& hd,
+                         const det_vector<size_t>& bs,
+                         int bit_length,
+                         const GeneralOp<ElemT>& H,
+                         bool sign,
+                         const std::vector<int>& slide,
+                         MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm) {
+    if (H.m1_.empty()) H.PrecomputeMasks(bit_length);
+
+    std::vector<CaopRawTerm> terms;
+    terms.reserve(H.o_.size());
+    for (const auto& op : H.o_) {
+        CaopRawTerm t;
+        t.n_dag = op.n_dag_;
+        for (const auto& f : op.fops_)
+            t.fops.push_back({ f.q_, f.d_ ? 1 : 0 });
+        terms.push_back(std::move(t));
+    }
+
+    const auto& fm1 = H.m1_.cflat();
+    const auto& fm2 = H.m2_.cflat();
+    std::vector<size_t> m1_flat(fm1.begin(), fm1.end());
+    std::vector<size_t> m2_flat(fm2.begin(), fm2.end());
+
+    driver.Init(hd, bs, bit_length, H.c_, terms, m1_flat, m2_flat,
+                sign, slide, h_comm, b_comm, t_comm);
+}
+
+// ============================================================
 // Free mult() — same signature as CPU version, selected by SBD_THRUST.
-// Declared as a friend of GeneralOp in generalop.h, so it can access
-// H.o_, H.c_, H.m1_, H.m2_ and the private members of ProductOp/CAOp.
-// Extracts them into POD structs, then forwards to CaopMultThrust.
-// Uses a static instance to avoid re-running Init on every Davidson iteration.
+// Declared as a friend of GeneralOp in generalop.h.
+// Single-shot wrapper: creates a fresh driver, inits, and runs once.
+// Callers that iterate (e.g. Davidson) should own a CaopMultThrust directly,
+// call InitCaopMultThrust() once, and call driver.run() per iteration.
 // ============================================================
 template <typename ElemT>
 void mult(const std::vector<ElemT>& hd,
@@ -707,34 +768,9 @@ void mult(const std::vector<ElemT>& hd,
           const GeneralOp<ElemT>& H,
           bool sign,
           MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm) {
-
-    static CaopMultThrust<ElemT>* driver = nullptr;
-    if (!driver) {
-        if (H.m1_.empty()) H.PrecomputeMasks(bit_length);
-
-        // Extract operator terms from GeneralOp (friend access).
-        std::vector<CaopRawTerm> terms;
-        terms.reserve(H.o_.size());
-        for (const auto& op : H.o_) {
-            CaopRawTerm t;
-            t.n_dag = op.n_dag_;
-            for (const auto& f : op.fops_)
-                t.fops.push_back({ f.q_, f.d_ ? 1 : 0 });
-            terms.push_back(std::move(t));
-        }
-
-        // Extract m1/m2 flat arrays.
-        const auto& fm1 = H.m1_.cflat();
-        const auto& fm2 = H.m2_.cflat();
-        std::vector<size_t> m1_flat(fm1.begin(), fm1.end());
-        std::vector<size_t> m2_flat(fm2.begin(), fm2.end());
-
-        driver = new CaopMultThrust<ElemT>();
-        driver->Init(hd, bs, bit_length,
-                     H.c_, terms, m1_flat, m2_flat,
-                     sign, slide, h_comm, b_comm, t_comm);
-    }
-    driver->run(wk, wb);
+    CaopMultThrust<ElemT> driver;
+    InitCaopMultThrust(driver, hd, bs, bit_length, H, sign, slide, h_comm, b_comm, t_comm);
+    driver.run(wk, wb);
 }
 
 } // namespace sbd
