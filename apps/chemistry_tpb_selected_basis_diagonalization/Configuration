@@ -32,6 +32,10 @@ SBD_PATH=../..
              -fopenmp-offload-mandatory -foffload-lto
   LDFLAGS += -fopenmp --offload-arch=gfx90a -foffload-lto
 
+# Enable if MPI is NOT CUDA-aware (copies device buffers to host before MPI calls).
+# This includes Allreduce, Isend/Irecv on device_vector, etc.
+# CCFLAGS += -DSBD_NON_CUDA_AWARE_MPI
+
 # accelerate using Thrust
 # CCFLAGS= -mp -cuda -fast -Minfo=accel --diag_suppress declared_but_not_referenced,set_but_not_used -fmax-errors=0 -I/opt/nvidia/hpc_sdk/Linux_x86_64/2025/cuda/include/cccl -I/usr/local/cuda/include -DSBD_THRUST
 #-DSBD_PREFECT

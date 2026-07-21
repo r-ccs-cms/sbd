@@ -17,7 +17,8 @@ set_property(CACHE SBD_GPU_BACKEND PROPERTY STRINGS none thrust omp5)
 set(SBD_GPU_ARCH "cc90" CACHE STRING "GPU architecture for the chosen backend")
 
 # ── Feature flags ─────────────────────────────────────────────────────────────
-option(SBD_THRUST_SAFE_MPI_ALLREDUCE   "Safe Thrust MPI allreduce"                         OFF)
+option(SBD_NON_CUDA_AWARE_MPI           "Use host-staging for all MPI comm on device memory" OFF)
+option(SBD_THRUST_SAFE_MPI_ALLREDUCE   "Safe Thrust MPI allreduce (subset of NON_CUDA_AWARE_MPI)" OFF)
 option(SBD_TRADMODE                    "Traditional (non-Thrust) CPU mode for tpb"         OFF)
 option(SBD_USE_NVTX                    "NVTX profiling annotations"                        OFF)
 option(SBD_USE_NCCL                    "Link against NCCL"                                 OFF)
@@ -82,6 +83,7 @@ function(sbd_configure_diag target)
   if(SBD_GPU_BACKEND STREQUAL "thrust")
     target_compile_definitions(${target} PRIVATE
       SBD_THRUST
+      $<$<BOOL:${SBD_NON_CUDA_AWARE_MPI}>:SBD_NON_CUDA_AWARE_MPI>
       $<$<BOOL:${SBD_THRUST_SAFE_MPI_ALLREDUCE}>:SBD_THRUST_SAFE_MPI_ALLREDUCE>
       $<$<BOOL:${SBD_USE_NVTX}>:SBD_USE_NVTX>
       $<$<BOOL:${SBD_USE_NCCL}>:SBD_USE_NCCL>

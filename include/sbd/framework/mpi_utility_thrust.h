@@ -19,7 +19,7 @@
 namespace sbd
 {
 
-#ifdef SBD_NON_CUDA_AWARE_MPI
+#if defined(SBD_NON_CUDA_AWARE_MPI) || defined(SBD_THRUST_SAFE_MPI_ALLREDUCE)
 
 template <typename ElemT>
 void MpiAllreduce(thrust::device_vector<ElemT> &A, MPI_Op op, MPI_Comm comm)
@@ -59,7 +59,7 @@ void MpiAllreduce(thrust::device_vector<ElemT> &A, MPI_Op op, MPI_Comm comm)
 #endif
 }
 
-#endif // SBD_NON_CUDA_AWARE_MPI
+#endif // SBD_NON_CUDA_AWARE_MPI || SBD_THRUST_SAFE_MPI_ALLREDUCE
 
 template <typename ElemT>
 void _MpiSlide(const ElemT* A,
