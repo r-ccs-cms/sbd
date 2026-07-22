@@ -322,22 +322,6 @@ inline void launch_caop_mult(size_t n_bras, F f, size_t smem_bytes, cudaStream_t
 }
 
 // ============================================================
-// POD structs for pre-extracted GeneralOp data.
-// CaopMultThrust::Init() takes these instead of GeneralOp directly
-// (GeneralOp members are private; only the friend mult() function
-// can read them and pass them here).
-// ============================================================
-struct CaopRawOp {
-    int q;        // orbital index
-    int is_dag;   // 1 = creation, 0 = annihilation
-};
-
-struct CaopRawTerm {
-    int n_dag;                    // number of leading creation ops
-    std::vector<CaopRawOp> fops; // ops in original order
-};
-
-// ============================================================
 // CaopMultThrust<ElemT>: host-side driver
 // ============================================================
 template <typename ElemT>
@@ -448,28 +432,23 @@ public:
         free_run_resources();
     }
 
-    // Init: accepts pre-extracted GeneralOp data (m1/m2 as flat vectors,
-    // terms as CaopRawTerm, c as coefficient vector). Extracts are done by
-    // InitCaopMultThrust() (friend of GeneralOp) and forwarded here.
-    // Does NOT precompute tbs_seq — that happens lazily on the first run() call.
+    // Init: uploads Hamiltonian and basis data to the GPU.
     // Idempotent: returns immediately if already initialized for the same problem.
     // Throws std::logic_error if dimensions changed without reset() being called.
+    // Does NOT precompute tbs_seq — that happens lazily on the first run() call.
     void Init(const std::vector<ElemT>& hd,
               const det_vector<size_t>& bs,
               int bit_length,
-              const std::vector<ElemT>& c,
-              const std::vector<CaopRawTerm>& terms,
-              const std::vector<size_t>& m1_flat,
-              const std::vector<size_t>& m2_flat,
+              const GeneralOp<ElemT>& H,
               bool sign,
               const std::vector<int>& slide,
               MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm) {
         // Idempotent: return if already initialized for the same problem.
         // Throw if dimensions changed without reset() being called first.
         if (init_done_) {
-            if ((int)terms.size() != n_terms_ ||
-                (int)bs.size()    != n_bras_  ||
-                slide.size()      != slide_.size())
+            if ((int)H.o_.size() != n_terms_ ||
+                (int)bs.size()   != n_bras_  ||
+                slide.size()     != slide_.size())
                 throw std::logic_error(
                     "CaopMultThrust::Init: problem dimensions changed; call reset() before reinitializing");
             return;
@@ -498,14 +477,22 @@ public:
         d_hd_.resize(hd.size());
         thrust::copy_n(hd.begin(), hd.size(), d_hd_.begin());
 
-        n_terms_ = (int)terms.size();
+        n_terms_ = (int)H.o_.size();
 
         if (n_terms_ > 0 && elem_size_ > 0) {
-            // Upload masks
-            d_m1_.resize(m1_flat.size());
-            thrust::copy_n(m1_flat.begin(), m1_flat.size(), d_m1_.begin());
-            d_m2_.resize(m2_flat.size());
-            thrust::copy_n(m2_flat.begin(), m2_flat.size(), d_m2_.begin());
+            // Compute and upload masks
+            det_vector<size_t> m1, m2;
+            H.PrecomputeMasks(bit_length, m1, m2);
+            {
+                const auto& fm1 = m1.cflat();
+                d_m1_.resize(fm1.size());
+                thrust::copy_n(fm1.begin(), fm1.size(), d_m1_.begin());
+            }
+            {
+                const auto& fm2 = m2.cflat();
+                d_m2_.resize(fm2.size());
+                thrust::copy_n(fm2.begin(), fm2.size(), d_m2_.begin());
+            }
 
             // Build sorted operator tables
             const int ES = elem_size_;
@@ -517,14 +504,14 @@ public:
 
             int fpos = 0;
             for (int m = 0; m < n_terms_; m++) {
-                const auto& term  = terms[m];
-                int n_fops = (int)term.fops.size();
-                int n_dag  = term.n_dag;
+                const auto& op = H.o_[m];
+                int n_fops = (int)op.fops_.size();
+                int n_dag  = op.n_dag_;
 
                 struct OpInfo { int orig_idx, word, bpos, type; };
                 std::vector<OpInfo> ops(n_fops);
                 for (int k = 0; k < n_fops; k++) {
-                    int q = term.fops[k].q;
+                    int q = op.fops_[k].q_;
                     ops[k] = { k, q / bit_length, q % bit_length, (k < n_dag) ? 0 : 1 };
                 }
 
@@ -542,7 +529,7 @@ public:
                 for (int i = 0; i < n_fops; i++)
                     for (int j = i + 1; j < n_fops; j++)
                         if (perm[i] > perm[j]) inv++;
-                coeff_host[m] = c[m] * ((sign && (inv & 1)) ? ElemT(-1) : ElemT(1));
+                coeff_host[m] = H.c_[m] * ((sign && (inv & 1)) ? ElemT(-1) : ElemT(1));
 
                 // Fill word_start and ndag_per_word
                 int cur_wi   = 0;
@@ -732,46 +719,9 @@ public:
 };
 
 // ============================================================
-// InitCaopMultThrust — extracts GeneralOp data and calls driver.Init().
-// Declared as a friend of GeneralOp / CAOp / ProductOp in generalop.h.
-// driver.Init() is idempotent: returns immediately on the second call if
-// dimensions haven't changed; throws if they changed without reset().
-// ============================================================
-template <typename ElemT>
-void InitCaopMultThrust(CaopMultThrust<ElemT>& driver,
-                         const std::vector<ElemT>& hd,
-                         const det_vector<size_t>& bs,
-                         int bit_length,
-                         const GeneralOp<ElemT>& H,
-                         bool sign,
-                         const std::vector<int>& slide,
-                         MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm) {
-    det_vector<size_t> m1, m2;
-    H.PrecomputeMasks(bit_length, m1, m2);
-
-    std::vector<CaopRawTerm> terms;
-    terms.reserve(H.o_.size());
-    for (const auto& op : H.o_) {
-        CaopRawTerm t;
-        t.n_dag = op.n_dag_;
-        for (const auto& f : op.fops_)
-            t.fops.push_back({ f.q_, f.d_ ? 1 : 0 });
-        terms.push_back(std::move(t));
-    }
-
-    const auto& fm1 = m1.cflat();
-    const auto& fm2 = m2.cflat();
-    std::vector<size_t> m1_flat(fm1.begin(), fm1.end());
-    std::vector<size_t> m2_flat(fm2.begin(), fm2.end());
-
-    driver.Init(hd, bs, bit_length, H.c_, terms, m1_flat, m2_flat,
-                sign, slide, h_comm, b_comm, t_comm);
-}
-
-// ============================================================
 // Free mult() — caller supplies a CaopMultThrust<ElemT>& to own GPU resources.
-// Calls InitCaopMultThrust() on every invocation; Init() returns immediately if
-// the driver is already initialized for the same problem (idempotent).
+// driver.Init() is idempotent: returns immediately if already initialized for
+// the same problem; throws if dimensions changed without reset().
 // Call reset() on the driver before reuse if H or the basis changes.
 // ============================================================
 template <typename ElemT>
@@ -785,7 +735,7 @@ void mult(const std::vector<ElemT>& hd,
           bool sign,
           MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm,
           CaopMultThrust<ElemT>& driver) {
-    InitCaopMultThrust(driver, hd, bs, bit_length, H, sign, slide, h_comm, b_comm, t_comm);
+    driver.Init(hd, bs, bit_length, H, sign, slide, h_comm, b_comm, t_comm);
     driver.run(wk, wb);
 }
 

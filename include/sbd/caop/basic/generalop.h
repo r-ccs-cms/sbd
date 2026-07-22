@@ -16,15 +16,6 @@ namespace sbd {
 
 #ifdef SBD_THRUST
   template <typename ElemT_> class CaopMultThrust;
-  template <typename ElemT_>
-  void InitCaopMultThrust(CaopMultThrust<ElemT_>& driver,
-                           const std::vector<ElemT_>& hd,
-                           const det_vector<size_t>& bs,
-                           int bit_length,
-                           const GeneralOp<ElemT_>& H,
-                           bool sign,
-                           const std::vector<int>& slide,
-                           MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm);
 #endif
 
   class CAOp {
@@ -102,15 +93,7 @@ namespace sbd {
 		     MPI_Comm b_comm,
 		     MPI_Comm t_comm);
 #ifdef SBD_THRUST
-    template <typename ElemT_>
-    friend void InitCaopMultThrust(CaopMultThrust<ElemT_>& driver,
-                                    const std::vector<ElemT_>& hd,
-                                    const det_vector<size_t>& bs,
-                                    int bit_length,
-                                    const GeneralOp<ElemT_>& H,
-                                    bool sign,
-                                    const std::vector<int>& slide,
-                                    MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm);
+    template <typename ElemT_> friend class CaopMultThrust;
 #endif
 
     template <typename ElemT_>
@@ -363,15 +346,7 @@ namespace sbd {
 		     MPI_Comm b_comm,
 		     MPI_Comm t_comm);
 #ifdef SBD_THRUST
-    template <typename ElemT_>
-    friend void InitCaopMultThrust(CaopMultThrust<ElemT_>& driver,
-                                    const std::vector<ElemT_>& hd,
-                                    const det_vector<size_t>& bs,
-                                    int bit_length,
-                                    const GeneralOp<ElemT_>& H,
-                                    bool sign,
-                                    const std::vector<int>& slide,
-                                    MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm);
+    template <typename ElemT_> friend class CaopMultThrust;
 #endif
 
     template <typename ElemT_>
@@ -795,15 +770,7 @@ namespace sbd {
 		     MPI_Comm b_comm,
 		     MPI_Comm t_comm);
 #ifdef SBD_THRUST
-    template <typename ElemT_>
-    friend void InitCaopMultThrust(CaopMultThrust<ElemT_>& driver,
-                                    const std::vector<ElemT_>& hd,
-                                    const det_vector<size_t>& bs,
-                                    int bit_length,
-                                    const GeneralOp<ElemT_>& H,
-                                    bool sign,
-                                    const std::vector<int>& slide,
-                                    MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm);
+    template <typename ElemT_> friend class CaopMultThrust;
 #endif
 
     template <typename ElemT_>
