@@ -44,6 +44,9 @@ namespace sbd {
     std::vector<ElemT> HC(W);
     std::vector<std::vector<ElemT>> C(num_block,W);
     std::vector<ElemT> edot;
+#ifdef SBD_THRUST
+    CaopMultThrust<ElemT> caop_driver;
+#endif
 
     for(int it=0; it < max_iteration; it++) {
 
@@ -63,14 +66,20 @@ namespace sbd {
       bool stop_it = false;
 
       for(int ib=0; ib < num_block; ib++) {
-	
+
 	n++;
 	int ii = ib + lda * ib;
 	int ij = ib + lda * (ib+1);
 	int ji = ib+1 + lda * ib;
+#ifdef SBD_THRUST
+	mult(hii,C[ib],HC,
+	     bs,bit_length,
+	     slide,Ham,sign,h_comm,b_comm,t_comm,caop_driver);
+#else
 	mult(hii,C[ib],HC,
 	     bs,bit_length,
 	     slide,Ham,sign,h_comm,b_comm,t_comm);
+#endif
 	InnerProduct(C[ib],HC,Aii,b_comm);
 	A[ii] = GetReal(Aii);
 	for(int i=0; i < n; i++) {

@@ -15,7 +15,7 @@ Included by mult.h when SBD_THRUST is defined. Same call signature as the CPU ve
 #include <algorithm>
 #include <vector>
 #include <cstring>
-#include <cassert>
+#include <stdexcept>
 
 #include "sbd/caop/basic/generalop.h"
 #include "sbd/framework/det_vector.h"
@@ -357,6 +357,7 @@ class CaopMultThrust {
     std::vector<thrust::device_vector<size_t>> d_tbs_seq_;
     std::vector<size_t> n_kets_per_task_;
     bool tbs_initialized_;
+    bool init_done_;
 
     // local bra det_vector (CPU) — stored at Init for seeding the first-run tbs slide
     det_vector<size_t> bs_;
@@ -412,7 +413,7 @@ class CaopMultThrust {
     }
 
 public:
-    CaopMultThrust() : tbs_initialized_(false), global_max_n_(0),
+    CaopMultThrust() : tbs_initialized_(false), init_done_(false), global_max_n_(0),
                        n_bras_(0), n_terms_(0), elem_size_(0),
                        sign_(false), smem_bytes_(0),
                        h_twk_{ nullptr, nullptr },
@@ -432,6 +433,8 @@ public:
             cudaStreamDestroy(compute_stream_);
         }
     }
+
+    bool is_initialized() const { return init_done_; }
 
     // Init: accepts pre-extracted GeneralOp data (m1/m2 as flat vectors,
     // terms as CaopRawTerm, c as coefficient vector). Extracts are done by
@@ -575,6 +578,7 @@ public:
         smem_bytes_ = (size_t)G * ps * sizeof(size_t)          // s_bra
                     + (size_t)G * BPGP * sizeof(int)            // s_n
                     + (size_t)G * sizeof(typename WR::TempStorage); // wr_tmp
+        init_done_ = true;
     }
 
     void run(const std::vector<ElemT>& wk, std::vector<ElemT>& wb) {
@@ -602,10 +606,11 @@ public:
         }
 
         // Verify mask sizes are consistent with elem_size_ set at Init().
-        assert((n_terms_ == 0 || elem_size_ == 0 ||
-                ((int)d_m1_.size() == n_terms_ * elem_size_ &&
-                 (int)d_m2_.size() == n_terms_ * elem_size_)) &&
-               "CaopMultThrust::run: mask size mismatch — elem_size_ changed after Init()");
+        if (n_terms_ != 0 && elem_size_ != 0 &&
+            ((int)d_m1_.size() != n_terms_ * elem_size_ ||
+             (int)d_m2_.size() != n_terms_ * elem_size_))
+            throw std::logic_error(
+                "CaopMultThrust::run: mask size mismatch (n_terms_ or elem_size_ changed after Init())");
 
         int mpi_size_h; MPI_Comm_size(h_comm_, &mpi_size_h);
         int mpi_rank_h; MPI_Comm_rank(h_comm_, &mpi_rank_h);
@@ -752,11 +757,11 @@ void InitCaopMultThrust(CaopMultThrust<ElemT>& driver,
 }
 
 // ============================================================
-// Free mult() — same signature as CPU version, selected by SBD_THRUST.
-// Declared as a friend of GeneralOp in generalop.h.
-// Single-shot wrapper: creates a fresh driver, inits, and runs once.
-// Callers that iterate (e.g. Davidson) should own a CaopMultThrust directly,
-// call InitCaopMultThrust() once, and call driver.run() per iteration.
+// Free mult() — caller supplies a CaopMultThrust<ElemT>& to own GPU resources.
+// Lazily calls InitCaopMultThrust() on the first invocation (!driver.is_initialized());
+// subsequent calls with the same driver skip Init and go directly to run().
+// To force re-initialization (e.g. after H or basis changes), call
+// InitCaopMultThrust() explicitly before the next mult() call.
 // ============================================================
 template <typename ElemT>
 void mult(const std::vector<ElemT>& hd,
@@ -767,9 +772,10 @@ void mult(const std::vector<ElemT>& hd,
           const std::vector<int>& slide,
           const GeneralOp<ElemT>& H,
           bool sign,
-          MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm) {
-    CaopMultThrust<ElemT> driver;
-    InitCaopMultThrust(driver, hd, bs, bit_length, H, sign, slide, h_comm, b_comm, t_comm);
+          MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm,
+          CaopMultThrust<ElemT>& driver) {
+    if (!driver.is_initialized())
+        InitCaopMultThrust(driver, hd, bs, bit_length, H, sign, slide, h_comm, b_comm, t_comm);
     driver.run(wk, wb);
 }
 
