@@ -47,7 +47,8 @@ namespace sbd {
       }
     }
 
-    if( H.m1_.empty() ) H.PrecomputeMasks(bit_length);
+    det_vector<size_t> m1, m2;
+    H.PrecomputeMasks(bit_length, m1, m2);
 
     ElemT volp(1.0/(mpi_size_h*mpi_size_t));
 #pragma omp parallel for
@@ -81,7 +82,7 @@ namespace sbd {
 	    {
 	      bool reject = false;
 	      for(size_t w=0; w < H.m1_[n].size(); w++) {
-		if( (~vb[w] & H.m1_[n][w]) || (vb[w] & H.m2_[n][w]) ) {
+		if( (~vb[w] & m1[n][w]) || (vb[w] & m2[n][w]) ) {
 		  reject = true; break;
 		}
 	      }

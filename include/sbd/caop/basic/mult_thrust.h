@@ -735,7 +735,8 @@ void InitCaopMultThrust(CaopMultThrust<ElemT>& driver,
                          bool sign,
                          const std::vector<int>& slide,
                          MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm) {
-    if (H.m1_.empty()) H.PrecomputeMasks(bit_length);
+    det_vector<size_t> m1, m2;
+    H.PrecomputeMasks(bit_length, m1, m2);
 
     std::vector<CaopRawTerm> terms;
     terms.reserve(H.o_.size());
@@ -747,8 +748,8 @@ void InitCaopMultThrust(CaopMultThrust<ElemT>& driver,
         terms.push_back(std::move(t));
     }
 
-    const auto& fm1 = H.m1_.cflat();
-    const auto& fm2 = H.m2_.cflat();
+    const auto& fm1 = m1.cflat();
+    const auto& fm2 = m2.cflat();
     std::vector<size_t> m1_flat(fm1.begin(), fm1.end());
     std::vector<size_t> m2_flat(fm2.begin(), fm2.end());
 
