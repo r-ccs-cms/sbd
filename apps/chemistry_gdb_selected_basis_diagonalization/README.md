@@ -81,12 +81,11 @@ Below is an explanation of each command-line option.
 - `--do_redist_alpha_eq <int>`:
   Whether to redistribute determinants across ranks so that each rank owns an equal-sized disjoint range of unique alpha strings (default: 1).
   This alpha-primary partition improves load balance in the Hamiltonian-vector multiply, where work per rank scales with the number of distinct alpha strings it holds.
-  Pass 0 to disable. When disabled and neither `--do_redist_det` nor `--do_sort_det` is given, each rank retains the determinants loaded from its input shard files with no further redistribution.
-  This option is mutually exclusive with `--do_redist_det` and `--do_sort_det`; when more than one is requested, `--do_sort_det` takes priority over `--do_redist_det`, which takes priority over `--do_redist_alpha_eq`.
+  Takes priority over all other redistribution options. Pass 0 to disable; when disabled, the behavior falls back to `--do_sort_det` if set, then `--do_redist_det` if set, otherwise each rank retains the determinants loaded from its input shard files with no further redistribution.
 - `--do_redist_det <int>`:
   If non-zero, redistribute determinants across ranks based on MPI file ownership: each rank receives the determinants from the shard files assigned to it.
   Useful when the input shard files are not already balanced across ranks.
-  Takes priority over `--do_redist_alpha_eq` but is superseded by `--do_sort_det`.
+  Used only when `--do_redist_alpha_eq 0` is explicitly passed and `--do_sort_det` is not set.
 - `--do_sort_det <int>`:
   If non-zero, redistribute determinants as with `--do_redist_det` and then reorder them within each rank.
-  Takes priority over both `--do_redist_det` and `--do_redist_alpha_eq`.
+  Used only when `--do_redist_alpha_eq 0` is explicitly passed; takes priority over `--do_redist_det`.
