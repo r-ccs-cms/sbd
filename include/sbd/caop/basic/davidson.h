@@ -115,15 +115,13 @@ namespace sbd {
 
       for(int ib=0; ib < nb; ib++) {
 	Zero(HC[ib]);
+	mult(hii,C[ib],HC[ib],
+	     bs,bit_length,
+	     slide,Ham,sign,h_comm,b_comm,t_comm
 #ifdef SBD_THRUST
-	mult(hii,C[ib],HC[ib],
-	     bs,bit_length,
-	     slide,Ham,sign,h_comm,b_comm,t_comm,caop_driver);
-#else
-	mult(hii,C[ib],HC[ib],
-	     bs,bit_length,
-	     slide,Ham,sign,h_comm,b_comm,t_comm);
+	     , caop_driver
 #endif
+	     );
 	for(int jb=0; jb <= ib; jb++) {
 	  InnerProduct(C[jb],HC[ib],H[jb+nb*ib],b_comm);
 	  H[ib+nb*jb] = Conjugate(H[jb+nb*ib]);

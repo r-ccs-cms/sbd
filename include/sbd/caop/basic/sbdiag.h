@@ -236,13 +236,12 @@ namespace sbd {
 	 */
 	auto time_start_mult = std::chrono::high_resolution_clock::now();
 	std::vector<ElemT> C(W.size(),0.0);
+	mult(hii,W,C,basis,bit_length,slide,H,sign,
+	     h_comm,b_comm,t_comm
 #ifdef SBD_THRUST
-	mult(hii,W,C,basis,bit_length,slide,H,sign,
-	     h_comm,b_comm,t_comm,caop_driver);
-#else
-	mult(hii,W,C,basis,bit_length,slide,H,sign,
-	     h_comm,b_comm,t_comm);
+	     , caop_driver
 #endif
+	     );
 	auto time_end_mult = std::chrono::high_resolution_clock::now();
 	auto elapsed_mult_count = std::chrono::duration_cast<std::chrono::microseconds>(time_end_mult-time_start_mult).count();
         double elapsed_mult = 0.000001 * elapsed_mult_count;
