@@ -412,52 +412,7 @@ class CaopMultThrust {
         }
     }
 
-public:
-    CaopMultThrust() : tbs_initialized_(false), init_done_(false), global_max_n_(0),
-                       n_bras_(0), n_terms_(0), elem_size_(0),
-                       sign_(false), smem_bytes_(0),
-                       h_twk_{ nullptr, nullptr },
-                       compute_stream_(nullptr), copy_stream_(nullptr),
-                       copy_done_{ nullptr, nullptr },
-                       compute_done_{ nullptr, nullptr } {}
-
-    ~CaopMultThrust() {
-        if (h_twk_[0] != nullptr) {
-            cudaFreeHost(h_twk_[0]);
-            cudaFreeHost(h_twk_[1]);
-            cudaEventDestroy(copy_done_[0]);
-            cudaEventDestroy(copy_done_[1]);
-            cudaEventDestroy(compute_done_[0]);
-            cudaEventDestroy(compute_done_[1]);
-            cudaStreamDestroy(copy_stream_);
-            cudaStreamDestroy(compute_stream_);
-        }
-    }
-
-    bool is_initialized() const { return init_done_; }
-
-    // Init: accepts pre-extracted GeneralOp data (m1/m2 as flat vectors,
-    // terms as CaopRawTerm, c as coefficient vector). Extracts are done by
-    // InitCaopMultThrust() (friend of GeneralOp) and forwarded here.
-    // Does NOT precompute tbs_seq — that happens lazily on the first run() call.
-    // Safe to call multiple times: resets all lazy state so run() re-initializes
-    // for the new problem (H or basis may have changed between calls).
-    void Init(const std::vector<ElemT>& hd,
-              const det_vector<size_t>& bs,
-              int bit_length,
-              const std::vector<ElemT>& c,
-              const std::vector<CaopRawTerm>& terms,
-              const std::vector<size_t>& m1_flat,
-              const std::vector<size_t>& m2_flat,
-              bool sign,
-              const std::vector<int>& slide,
-              MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm) {
-        // Reset lazy state so run() re-initializes for this problem.
-        tbs_initialized_ = false;
-        d_tbs_seq_.clear();
-        n_kets_per_task_.clear();
-        // Free persistent run() resources if previously allocated, so run()
-        // re-allocates them sized for the (possibly different) global_max_n_.
+    void free_run_resources() {
         if (h_twk_[0] != nullptr) {
             cudaFreeHost(h_twk_[0]); h_twk_[0] = nullptr;
             cudaFreeHost(h_twk_[1]); h_twk_[1] = nullptr;
@@ -468,6 +423,62 @@ public:
             cudaStreamDestroy(copy_stream_);  copy_stream_  = nullptr;
             cudaStreamDestroy(compute_stream_); compute_stream_ = nullptr;
         }
+    }
+
+public:
+    CaopMultThrust() : tbs_initialized_(false), init_done_(false), global_max_n_(0),
+                       n_bras_(0), n_terms_(0), elem_size_(0),
+                       sign_(false), smem_bytes_(0),
+                       h_twk_{ nullptr, nullptr },
+                       compute_stream_(nullptr), copy_stream_(nullptr),
+                       copy_done_{ nullptr, nullptr },
+                       compute_done_{ nullptr, nullptr } {}
+
+    ~CaopMultThrust() { free_run_resources(); }
+
+    bool is_initialized() const { return init_done_; }
+
+    // Reset to uninitialized state. Must be called if H or the basis size changes
+    // between sbd::diag() calls, to discard stale cached data.
+    void reset() {
+        tbs_initialized_ = false;
+        init_done_ = false;
+        d_tbs_seq_.clear();
+        n_kets_per_task_.clear();
+        free_run_resources();
+    }
+
+    // Init: accepts pre-extracted GeneralOp data (m1/m2 as flat vectors,
+    // terms as CaopRawTerm, c as coefficient vector). Extracts are done by
+    // InitCaopMultThrust() (friend of GeneralOp) and forwarded here.
+    // Does NOT precompute tbs_seq — that happens lazily on the first run() call.
+    // Idempotent: returns immediately if already initialized for the same problem.
+    // Throws std::logic_error if dimensions changed without reset() being called.
+    void Init(const std::vector<ElemT>& hd,
+              const det_vector<size_t>& bs,
+              int bit_length,
+              const std::vector<ElemT>& c,
+              const std::vector<CaopRawTerm>& terms,
+              const std::vector<size_t>& m1_flat,
+              const std::vector<size_t>& m2_flat,
+              bool sign,
+              const std::vector<int>& slide,
+              MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm) {
+        // Idempotent: return if already initialized for the same problem.
+        // Throw if dimensions changed without reset() being called first.
+        if (init_done_) {
+            if ((int)terms.size() != n_terms_ ||
+                (int)bs.size()    != n_bras_  ||
+                slide.size()      != slide_.size())
+                throw std::logic_error(
+                    "CaopMultThrust::Init: problem dimensions changed; call reset() before reinitializing");
+            return;
+        }
+        // Clear lazy state and free persistent run() resources for the new problem.
+        tbs_initialized_ = false;
+        d_tbs_seq_.clear();
+        n_kets_per_task_.clear();
+        free_run_resources();
         h_comm_ = h_comm; b_comm_ = b_comm; t_comm_ = t_comm;
         sign_   = sign;
         slide_  = slide;
@@ -723,8 +734,8 @@ public:
 // ============================================================
 // InitCaopMultThrust — extracts GeneralOp data and calls driver.Init().
 // Declared as a friend of GeneralOp / CAOp / ProductOp in generalop.h.
-// Callers (e.g. sbdiag.h method==0) own the CaopMultThrust lifetime and
-// call Init() again whenever H or basis changes between sbd::diag() calls.
+// driver.Init() is idempotent: returns immediately on the second call if
+// dimensions haven't changed; throws if they changed without reset().
 // ============================================================
 template <typename ElemT>
 void InitCaopMultThrust(CaopMultThrust<ElemT>& driver,
@@ -759,10 +770,9 @@ void InitCaopMultThrust(CaopMultThrust<ElemT>& driver,
 
 // ============================================================
 // Free mult() — caller supplies a CaopMultThrust<ElemT>& to own GPU resources.
-// Lazily calls InitCaopMultThrust() on the first invocation (!driver.is_initialized());
-// subsequent calls with the same driver skip Init and go directly to run().
-// To force re-initialization (e.g. after H or basis changes), call
-// InitCaopMultThrust() explicitly before the next mult() call.
+// Calls InitCaopMultThrust() on every invocation; Init() returns immediately if
+// the driver is already initialized for the same problem (idempotent).
+// Call reset() on the driver before reuse if H or the basis changes.
 // ============================================================
 template <typename ElemT>
 void mult(const std::vector<ElemT>& hd,
@@ -775,8 +785,7 @@ void mult(const std::vector<ElemT>& hd,
           bool sign,
           MPI_Comm h_comm, MPI_Comm b_comm, MPI_Comm t_comm,
           CaopMultThrust<ElemT>& driver) {
-    if (!driver.is_initialized())
-        InitCaopMultThrust(driver, hd, bs, bit_length, H, sign, slide, h_comm, b_comm, t_comm);
+    InitCaopMultThrust(driver, hd, bs, bit_length, H, sign, slide, h_comm, b_comm, t_comm);
     driver.run(wk, wb);
 }
 

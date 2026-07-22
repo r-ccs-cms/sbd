@@ -50,7 +50,11 @@ namespace sbd {
 		int num_block,
 		int num_initvec,
 		RealT eps,
-		size_t seed) {
+		size_t seed
+#ifdef SBD_THRUST
+		, CaopMultThrust<ElemT>& caop_driver
+#endif
+		) {
 
     // RealT eps_reg = 1.0e-12;
     size_t w_size = W.size();
@@ -100,10 +104,6 @@ namespace sbd {
 	MpiBcast(V[iv],0,t_comm);
       }
     }
-
-#ifdef SBD_THRUST
-    CaopMultThrust<ElemT> caop_driver;
-#endif
 
     for(int it=0; it < max_iteration; it++) {
       for(int iv=0; iv < num_initvec; iv++) {

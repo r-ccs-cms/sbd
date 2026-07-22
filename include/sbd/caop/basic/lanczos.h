@@ -24,8 +24,12 @@ namespace sbd {
 	       MPI_Comm t_comm,
 	       int max_iteration,
 	       int num_block,
-	       RealT eps) {
-    
+	       RealT eps
+#ifdef SBD_THRUST
+	       , CaopMultThrust<ElemT>& caop_driver
+#endif
+	       ) {
+
     char jobz = 'V';
     char uplo = 'U';
     int lda   = num_block;
@@ -44,9 +48,6 @@ namespace sbd {
     std::vector<ElemT> HC(W);
     std::vector<std::vector<ElemT>> C(num_block,W);
     std::vector<ElemT> edot;
-#ifdef SBD_THRUST
-    CaopMultThrust<ElemT> caop_driver;
-#endif
 
     for(int it=0; it < max_iteration; it++) {
 

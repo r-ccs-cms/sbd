@@ -81,7 +81,7 @@ namespace sbd {
 	    // fast reject: required bits absent or forbidden bits present
 	    {
 	      bool reject = false;
-	      for(size_t w=0; w < H.m1_[n].size(); w++) {
+	      for(size_t w=0; w < m1[n].size(); w++) {
 		if( (~vb[w] & m1[n][w]) || (vb[w] & m2[n][w]) ) {
 		  reject = true; break;
 		}
