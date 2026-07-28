@@ -56,12 +56,18 @@ void GetTotalD_Thrust(const thrust::device_vector<ElemT> & hii,
         thrust::device_vector<ElemT>& dii,
         MPI_Comm h_comm) {
     SBD_NVTX_RANGE_COLOR("GetTotalD_Thrust", __LINE__);
+    int h_size; MPI_Comm_size(h_comm, &h_size);
     int size_d = hii.size();
     dii.resize(hii.size());
-    MPI_Datatype DataT = GetMpiType<ElemT>::MpiT;
-    {
-        SBD_NVTX_RANGE_COLOR("MPI_Allreduce", 0);
-        MPI_Allreduce((ElemT*)thrust::raw_pointer_cast(hii.data()), (ElemT*)thrust::raw_pointer_cast(dii.data()), size_d, DataT, MPI_SUM, h_comm);
+    if (h_size == 1) {
+        cudaMemcpy(thrust::raw_pointer_cast(dii.data()),
+                   thrust::raw_pointer_cast(hii.data()),
+                   size_d * sizeof(ElemT), cudaMemcpyDeviceToDevice);
+    } else {
+        MPI_Datatype DataT = GetMpiType<ElemT>::MpiT;
+        MPI_Allreduce((ElemT*)thrust::raw_pointer_cast(hii.data()),
+                      (ElemT*)thrust::raw_pointer_cast(dii.data()),
+                      size_d, DataT, MPI_SUM, h_comm);
     }
 }
 
