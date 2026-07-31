@@ -712,13 +712,13 @@ namespace sbd {
       if( mpi_rank_h == 0 ) {
 	if( mpi_rank_t == 0 ) {
 	  load_basis_from_files(detfiles,det,bit_length,2*L,b_comm);
-	  if( sbd_data.do_sort_det ) {
+	  if( sbd_data.do_redist_alpha_eq ) {
+	    redistribution_equal_bra_a(det,bit_length,2*L,b_comm);
+	  } else if( sbd_data.do_sort_det ) {
 	    redistribution(det,bit_length,2*L,b_comm);
 	    reordering(det,bit_length,2*L,b_comm);
 	  } else if ( sbd_data.do_redist_det ) {
 	    redistribution(det,bit_length,2*L,b_comm);
-	  } else if ( sbd_data.do_redist_alpha_eq ) {
-	    redistribution_equal_bra_a(det,bit_length,2*L,b_comm);
 	  }
 	}
 	MpiBcast(det,0,t_comm);

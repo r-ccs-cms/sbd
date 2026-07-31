@@ -150,13 +150,13 @@ int main(int argc, char * argv[]) {
     if( mpi_rank_t == 0 ) {
       sbd::load_basis_from_files(detfiles,det,bit_length,2*L,b_comm);
       sbd::sort_bitarray(det);
-      if( sbd_data.do_sort_det ) {
+      if( sbd_data.do_redist_alpha_eq ) {
+	sbd::redistribution_equal_bra_a(det,bit_length,2*L,b_comm);
+      } else if( sbd_data.do_sort_det ) {
 	sbd::redistribution(det,bit_length,2*L,b_comm);
 	sbd::reordering(det,bit_length,2*L,b_comm);
       } else if ( sbd_data.do_redist_det ) {
 	sbd::redistribution(det,bit_length,2*L,b_comm);
-      } else if ( sbd_data.do_redist_alpha_eq ) {
-	sbd::redistribution_equal_bra_a(det,bit_length,2*L,b_comm);
       }
     }
     sbd::MpiBcast(det,0,t_comm);
