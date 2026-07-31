@@ -242,12 +242,12 @@ int main(int argc, char * argv[]) {
   }
   if( one_p_rdm.size() != 0 ) {
     if ( mpi_rank == 0 ) {
-      double zerobody = 0.0;
+      Elem zerobody = 0.0;
       Elem onebody = 0.0;
       Elem twobody = 0.0;
-      double I0;
-      sbd::oneInt<double> I1;
-      sbd::twoInt<double> I2;
+      Elem I0;
+      sbd::oneInt<Elem> I1;
+      sbd::twoInt<Elem> I2;
       sbd::SetupIntegrals(fcidump,L,N,I0,I1,I2);
       zerobody = I0;
 
