@@ -314,17 +314,17 @@ namespace sbd {
       }
       if (mpi_size_b > 1) {
           init_nccl_comm(&b_nccl_comm, b_comm);
-          thrust::device_vector<double> A(W.size(), 0.0);
+          thrust::device_vector<double> A(1, 0.0);
           nccl_allreduce(A, ncclSum, b_nccl_comm);
       }
       if (false && mpi_size_t > 1) {
           init_nccl_comm(&t_nccl_comm, t_comm);
-          thrust::device_vector<double> A(W.size(), 0.0);
+          thrust::device_vector<double> A(1, 0.0);
           nccl_allreduce(A, ncclSum, t_nccl_comm);
       }
       if (mpi_size_a > 1) {
           init_nccl_comm(&a_nccl_comm, a_comm);
-          thrust::device_vector<double> A(W.size(), 0.0);
+          thrust::device_vector<double> A(1, 0.0);
           nccl_allreduce(A, ncclSum, a_nccl_comm);
       }
       printf("[%s,%d] NCCL communicators have been created.\n",
