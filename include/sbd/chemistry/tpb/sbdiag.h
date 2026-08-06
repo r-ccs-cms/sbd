@@ -759,9 +759,19 @@ namespace sbd {
 
       FreeHelpers(helper);
 
+#ifdef SBD_USE_NCCL
+      if (mpi_size_b > 1) {
+          ncclCommDestroy(b_nccl_comm);
+      }
+      if (mpi_size_a > 1) {
+          ncclCommDestroy(a_nccl_comm);
+      }
+#endif
+
       MPI_Comm_free(&h_comm);
       MPI_Comm_free(&b_comm);
       MPI_Comm_free(&t_comm);
+      MPI_Comm_free(&a_comm);
     } // end void diag function
 
     /**
