@@ -191,6 +191,52 @@ namespace sbd {
     }
   }
 
+  template<typename ElemT, det_kind Kind>
+  void MpiSend(const det_vector<ElemT,Kind>& config, int dest, MPI_Comm comm) {
+    size_t c_num = config.size();
+    size_t c_len = config.elem_size();
+    MPI_Send(&c_num,1,SBD_MPI_SIZE_T,dest,0,comm);
+    if( c_num != 0 ) {
+      MPI_Send(&c_len,1,SBD_MPI_SIZE_T,dest,1,comm);
+      MPI_Datatype DataT = GetMpiType<ElemT>::MpiT;
+      MPI_Send(config.cflat().data(),static_cast<int>(c_num*c_len),DataT,dest,2,comm);
+    }
+  }
+
+  template<typename ElemT, det_kind Kind>
+  void MpiRecv(det_vector<ElemT,Kind>& config, int source, MPI_Comm comm) {
+    MPI_Status status;
+    size_t c_num, c_len;
+    MPI_Recv(&c_num,1,SBD_MPI_SIZE_T,source,0,comm,&status);
+    if( c_num != 0 ) {
+      MPI_Recv(&c_len,1,SBD_MPI_SIZE_T,source,1,comm,&status);
+      det_vector<ElemT,Kind>::init_elem_size(c_len);
+      config.resize(c_num);
+      MPI_Datatype DataT = GetMpiType<ElemT>::MpiT;
+      MPI_Recv(config.flat().data(),static_cast<int>(c_num*c_len),DataT,source,2,comm,&status);
+    }
+  }
+
+  template<typename ElemT, det_kind Kind>
+  void MpiBcast(det_vector<ElemT,Kind>& config, int root, MPI_Comm comm) {
+    size_t c_num, c_len;
+    int mpi_rank; MPI_Comm_rank(comm,&mpi_rank);
+    if( mpi_rank == root ) {
+      c_num = config.size();
+      c_len = config.elem_size();
+    }
+    MPI_Bcast(&c_num,1,SBD_MPI_SIZE_T,root,comm);
+    if( c_num != 0 ) {
+      MPI_Bcast(&c_len,1,SBD_MPI_SIZE_T,root,comm);
+      det_vector<ElemT,Kind>::init_elem_size(c_len);
+      if( mpi_rank != root ) {
+        config.resize(c_num);
+      }
+      MPI_Datatype DataT = GetMpiType<ElemT>::MpiT;
+      MPI_Bcast(config.flat().data(),static_cast<int>(c_num*c_len),DataT,root,comm);
+    }
+  }
+
   template <typename ElemT>
   void MpiIncSlide(const std::vector<ElemT> & A,
 		   std::vector<ElemT> & B,

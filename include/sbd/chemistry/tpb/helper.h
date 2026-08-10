@@ -66,8 +66,8 @@ namespace sbd {
 
   };
 
-  void GenerateSingles(const std::vector<std::vector<size_t>> & ADets,
-		       const std::vector<std::vector<size_t>> & BDets,
+  void GenerateSingles(const det_vector<size_t, det_kind::half> & ADets,
+		       const det_vector<size_t, det_kind::half> & BDets,
 		       const size_t bit_length,
 		       const size_t norb,
 		       TaskHelpers & helper) {
@@ -90,7 +90,7 @@ namespace sbd {
       for(size_t ib=braAlphaStart; ib < braAlphaEnd; ib++) {
         std::vector<int> closed(norb);
         std::vector<int> open(norb);
-        auto aDet = ADets[0];
+        std::vector<size_t> aDet(ADets.elem_size());
         int nclosed = getOpenClosed(ADets[ib],bit_length,norb,open,closed);
         for(size_t j=0; j < nclosed; j++) {
   	  for(size_t k=0; k < norb-nclosed; k++) {
@@ -116,7 +116,7 @@ namespace sbd {
       for(size_t ib=braBetaStart; ib < braBetaEnd; ib++) {
         std::vector<int> closed(norb);
         std::vector<int> open(norb);
-        auto bDet = BDets[0];
+        std::vector<size_t> bDet(BDets.elem_size());
         int nclosed = getOpenClosed(BDets[ib],bit_length,norb,open,closed);
         for(size_t j=0; j < nclosed; j++) {
 	  for(size_t k=0; k < norb-nclosed; k++) {
@@ -139,8 +139,8 @@ namespace sbd {
 
   }
 
-  void GenerateDoubles(const std::vector<std::vector<size_t>> & ADets,
-		       const std::vector<std::vector<size_t>> & BDets,
+  void GenerateDoubles(const det_vector<size_t, det_kind::half> & ADets,
+		       const det_vector<size_t, det_kind::half> & BDets,
 		       const size_t bit_length,
 		       const size_t norb,
 		       TaskHelpers & helper) {
@@ -182,8 +182,8 @@ namespace sbd {
 
 }
 
-void GenerateExcitation(const std::vector<std::vector<size_t>> &adets,
-                        const std::vector<std::vector<size_t>> &bdets,
+void GenerateExcitation(const det_vector<size_t, det_kind::half> &adets,
+                        const det_vector<size_t, det_kind::half> &bdets,
                         const size_t bit_length, const size_t norb,
                         TaskHelpers &helper) {
   size_t braAlphaStart = helper.braAlphaStart;
@@ -707,8 +707,8 @@ void FreeHelpers(std::vector<TaskHelpers> &helper) {
     }
   }
 
-  void MakeHelpers(const std::vector<std::vector<size_t>> & adets,
-		   const std::vector<std::vector<size_t>> & bdets,
+  void MakeHelpers(const det_vector<size_t, det_kind::half> & adets,
+		   const det_vector<size_t, det_kind::half> & bdets,
 		   size_t bit_length,
 		   size_t norb,
 		   std::vector<TaskHelpers> & helper,
@@ -913,8 +913,8 @@ std::vector<size_t> TaskCostSize(const std::vector<TaskHelpers> &helper,
   return cost;
   }
 
-  void RemakeHelpers(const std::vector<std::vector<size_t>> & adet,
-		     const std::vector<std::vector<size_t>> & bdet,
+  void RemakeHelpers(const det_vector<size_t, det_kind::half> & adet,
+		     const det_vector<size_t, det_kind::half> & bdet,
 		     size_t bit_length,
 		     size_t norb,
 		     std::vector<TaskHelpers> & helper,

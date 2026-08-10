@@ -79,10 +79,9 @@ public:
             return std::vector<ElemT>(_data, _data + size());
         }
 
-        // In-place copy from vector; row size must match.
+        // In-place copy from vector; sets _elem_size if not yet set, else must match.
         row& operator=(const std::vector<ElemT>& v) {
-            if (v.size() != size())
-                throw std::length_error("det_vector::row: vector size mismatch");
+            det_vector::_set_elem_size(v.size());
             std::memcpy(_data, v.data(), size() * sizeof(ElemT));
             return *this;
         }
@@ -380,7 +379,6 @@ public:
     }
 
     void push_back(const row& r) {
-        _set_elem_size(r.size());
         _data.resize((_size + 1) * stride());
         _init_row(_size, r._data);
         ++_size;

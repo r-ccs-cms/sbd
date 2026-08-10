@@ -414,7 +414,8 @@ namespace sbd {
   }
 
   // det_vector overload: pointer-sort avoids moving non-constructible row objects.
-  void sort_bitarray(det_vector<size_t>& a) {
+  template <det_kind Kind>
+  void sort_bitarray(det_vector<size_t, Kind>& a) {
     size_t n = a.size();
     if (n <= 1) return;
     size_t row_len = a.elem_size();
@@ -427,7 +428,7 @@ namespace sbd {
             return std::memcmp(x, y, row_len * sizeof(size_t)) == 0;
         });
     size_t unique_n = static_cast<size_t>(end_it - ptrs.begin());
-    det_vector<size_t> result(unique_n);
+    det_vector<size_t, Kind> result(unique_n);
     for (size_t i = 0; i < unique_n; i++)
         std::memcpy(result[i].data(), ptrs[i], row_len * sizeof(size_t));
     a = std::move(result);

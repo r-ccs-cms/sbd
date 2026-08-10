@@ -12,16 +12,16 @@ namespace sbd {
    */
   template <typename ElemT, typename RealT>
   void SinglesExtendHalfdets(const std::vector<ElemT> & w,
-			     const std::vector<std::vector<size_t>> & adet,
-			     const std::vector<std::vector<size_t>> & bdet,
+			     const det_vector<size_t, det_kind::half> & adet,
+			     const det_vector<size_t, det_kind::half> & bdet,
 			     size_t bit_length,
 			     size_t norb,
 			     size_t adet_comm_size,
 			     size_t bdet_comm_size,
 			     MPI_Comm comm,
 			     RealT cutoff,
-			     std::vector<std::vector<size_t>> & res_adet,
-			     std::vector<std::vector<size_t>> & res_bdet,
+			     det_vector<size_t, det_kind::half> & res_adet,
+			     det_vector<size_t, det_kind::half> & res_bdet,
 			     RealT & total_weight) {
 
     int mpi_rank; MPI_Comm_rank(comm,&mpi_rank);
@@ -183,15 +183,15 @@ namespace sbd {
      without amplitude-based selection.
      This function assumes carryover bitstrings as input.
    */
-  void SinglesExtendHalfdets(const std::vector<std::vector<size_t>> & adet,
-			     const std::vector<std::vector<size_t>> & bdet,
+  void SinglesExtendHalfdets(const det_vector<size_t, det_kind::half> & adet,
+			     const det_vector<size_t, det_kind::half> & bdet,
 			     size_t bit_length,
 			     size_t norb,
 			     const size_t adet_comm_size,
 			     const size_t bdet_comm_size,
 			     MPI_Comm comm,
-			     std::vector<std::vector<size_t>> & res_adet,
-			     std::vector<std::vector<size_t>> & res_bdet) {
+			     det_vector<size_t, det_kind::half> & res_adet,
+			     det_vector<size_t, det_kind::half> & res_bdet) {
     
     int mpi_rank; MPI_Comm_rank(comm,&mpi_rank);
     int mpi_size; MPI_Comm_size(comm,&mpi_size);
@@ -318,7 +318,7 @@ namespace sbd {
     MPI_Comm_free(&adet_comm);
     MPI_Comm_free(&bdet_comm);
   }
-  
+
 }
 
 #endif

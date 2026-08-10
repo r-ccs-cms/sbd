@@ -103,8 +103,8 @@ x = 0    1    2    3
 
   template <typename ElemT>
   void BasisInitVector(std::vector<ElemT> & W,
-		       const std::vector<std::vector<size_t>> & adet,
-		       const std::vector<std::vector<size_t>> & bdet,
+		       const det_vector<size_t, det_kind::half> & adet,
+		       const det_vector<size_t, det_kind::half> & bdet,
 		       const size_t adet_comm_size,
 		       const size_t bdet_comm_size,
 		       MPI_Comm h_comm,
@@ -414,8 +414,8 @@ x = 0    1    2    3
   template <typename ElemT, typename RealT>
   void Davidson(const std::vector<ElemT> & hii,
 		std::vector<ElemT> & W,
-		const std::vector<std::vector<size_t>> & adets,
-		const std::vector<std::vector<size_t>> & bdets,
+		const det_vector<size_t, det_kind::half> & adets,
+		const det_vector<size_t, det_kind::half> & bdets,
 		const size_t bit_length,
 		const size_t norbs,
 		const size_t adet_comm_size,
@@ -667,8 +667,8 @@ x = 0    1    2    3
   template <typename ElemT, typename RealT>
   void Davidson(const std::vector<ElemT> & hii,
 		std::vector<ElemT> & W,
-		const std::vector<std::vector<size_t>> & adets,
-		const std::vector<std::vector<size_t>> & bdets,
+		const det_vector<size_t, det_kind::half> & adets,
+		const det_vector<size_t, det_kind::half> & bdets,
 		const size_t bit_length,
 		const size_t norbs,
 		const size_t adet_comm_size,

@@ -84,8 +84,8 @@ int main(int argc, char * argv[]) {
   int N;
   double energy;
   std::vector<double> density;
-  std::vector<std::vector<size_t>> co_adet;
-  std::vector<std::vector<size_t>> co_bdet;
+  sbd::det_vector<size_t, sbd::det_kind::half> co_adet;
+  sbd::det_vector<size_t, sbd::det_kind::half> co_bdet;
   std::vector<std::vector<double>> one_p_rdm;
   std::vector<std::vector<double>> two_p_rdm;
   sbd::FCIDump fcidump;
@@ -141,8 +141,8 @@ int main(int argc, char * argv[]) {
   /**
      setup determinants for alpha and beta spin orbitals
    */
-  std::vector<std::vector<size_t>> adet;
-  std::vector<std::vector<size_t>> bdet;
+  sbd::det_vector<size_t, sbd::det_kind::half> adet;
+  sbd::det_vector<size_t, sbd::det_kind::half> bdet;
   if( bdetfile.empty() ) {
     if( mpi_rank == 0 ) {
       sbd::LoadAlphaDets(adetfile,adet,sbd_data.bit_length,L);

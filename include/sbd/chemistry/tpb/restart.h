@@ -19,8 +19,8 @@ namespace sbd {
 
   template <typename ElemT>
   void SaveWavefunction(const std::string file,
-			const std::vector<std::vector<size_t>> & adet,
-			const std::vector<std::vector<size_t>> & bdet,
+			const det_vector<size_t, det_kind::half> & adet,
+			const det_vector<size_t, det_kind::half> & bdet,
 			size_t adet_comm_size,
 			size_t bdet_comm_size,
 			MPI_Comm h_comm,
@@ -32,7 +32,7 @@ namespace sbd {
     int mpi_size_b; MPI_Comm_size(b_comm,&mpi_size_b);
     int mpi_rank_t; MPI_Comm_rank(t_comm,&mpi_rank_t);
 
-    size_t det_length = adet[0].size();
+    size_t det_length = adet.elem_size();
     int adet_rank = mpi_rank_b / bdet_comm_size;
     int bdet_rank = mpi_rank_b % bdet_comm_size;
 
@@ -45,8 +45,8 @@ namespace sbd {
     size_t adet_range = adet_end - adet_start;
     size_t bdet_range = bdet_end - bdet_start;
 
-    std::vector<std::vector<size_t>> adet_copy(adet);
-    std::vector<std::vector<size_t>> bdet_copy(bdet);
+    det_vector<size_t, det_kind::half> adet_copy(adet);
+    det_vector<size_t, det_kind::half> bdet_copy(bdet);
 
     if( mpi_rank_h == 0 && mpi_rank_t == 0 ) {
       std::string tag = to_padded_string(mpi_rank_b,6);
@@ -70,8 +70,8 @@ namespace sbd {
 
   template <typename ElemT>
   void LoadWavefunction(const std::string & file,
-			const std::vector<std::vector<size_t>> & adet,
-			const std::vector<std::vector<size_t>> & bdet,
+			const det_vector<size_t, det_kind::half> & adet,
+			const det_vector<size_t, det_kind::half> & bdet,
 			const size_t adet_comm_size,
 			const size_t bdet_comm_size,
 			const MPI_Comm h_comm,
@@ -413,8 +413,8 @@ namespace sbd {
 
   template <typename ElemT>
   void LoadWavefunction(const std::string & file,
-			const std::vector<std::vector<size_t>> & adet,
-			const std::vector<std::vector<size_t>> & bdet,
+			const det_vector<size_t, det_kind::half> & adet,
+			const det_vector<size_t, det_kind::half> & bdet,
 			const size_t adet_comm_size,
 			const size_t bdet_comm_size,
 			const MPI_Comm h_comm,
@@ -662,8 +662,8 @@ namespace sbd {
   template <typename ElemT>
   void SaveMatrixFormWF(const std::string filename,
 			size_t bit_length, size_t norb,
-			const std::vector<std::vector<size_t>> & adet,
-			const std::vector<std::vector<size_t>> & bdet,
+			const det_vector<size_t, det_kind::half> & adet,
+			const det_vector<size_t, det_kind::half> & bdet,
 			size_t adet_comm_size,
 			size_t bdet_comm_size,
 			MPI_Comm h_comm,

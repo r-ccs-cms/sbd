@@ -42,13 +42,13 @@ int main(int argc, char * argv[]) {
     }
   }
 
-  std::vector<std::vector<size_t>> adet;
+  sbd::det_vector<size_t, sbd::det_kind::half> adet;
   if( mpi_rank == 0 ) {
     sbd::LoadAlphaDets(adetfile,adet,bit_length,L);
     sbd::sort_bitarray(adet);
   }
   sbd::MpiBcast(adet,0,comm);
-  std::vector<std::vector<size_t>> bdet(adet);
+  sbd::det_vector<size_t, sbd::det_kind::half> bdet(adet);
 
   std::vector<std::vector<size_t>> det;
 

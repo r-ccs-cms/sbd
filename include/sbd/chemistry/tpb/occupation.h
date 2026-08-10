@@ -10,8 +10,8 @@ namespace sbd {
   template <typename ElemT>
   void OccupationDensity(const std::vector<int> & oIdx,
 			 const std::vector<ElemT> & W,
-			 const std::vector<std::vector<size_t>> & adet,
-			 const std::vector<std::vector<size_t>> & bdet,
+			 const det_vector<size_t, det_kind::half> & adet,
+			 const det_vector<size_t, det_kind::half> & bdet,
 			 const size_t bit_length,
 			 size_t adet_comm_size,
 			 size_t bdet_comm_size,

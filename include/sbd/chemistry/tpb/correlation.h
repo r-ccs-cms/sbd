@@ -19,8 +19,8 @@ namespace sbd {
 #ifdef USE_OMP_OFFLOAD
   template <typename ElemT>
   void Correlation(const std::vector<ElemT> & W,
-		   const std::vector<std::vector<size_t>> & adet,
-		   const std::vector<std::vector<size_t>> & bdet,
+		   const det_vector<size_t, det_kind::half> & adet,
+		   const det_vector<size_t, det_kind::half> & bdet,
 		   const size_t bit_length,
 		   const size_t norb,
 		   const size_t adet_comm_size,
@@ -377,8 +377,8 @@ namespace sbd {
 
   template <typename ElemT>
   void Correlation(const std::vector<ElemT> & W,
-		   const std::vector<std::vector<size_t>> & adet,
-		   const std::vector<std::vector<size_t>> & bdet,
+		   const det_vector<size_t, det_kind::half> & adet,
+		   const det_vector<size_t, det_kind::half> & bdet,
 		   const size_t bit_length,
 		   const size_t norb,
 		   const size_t adet_comm_size,

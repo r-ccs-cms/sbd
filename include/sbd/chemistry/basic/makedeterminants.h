@@ -5,8 +5,6 @@
 #ifndef SBD_CHEMISTRY_BASIC_MAKEDETERMINANTS_H
 #define SBD_CHEMISTRY_BASIC_MAKEDETERMINANTS_H
 
-#include <deque>
-
 namespace sbd {
 
   void SetupDeterminants(const std::vector<std::vector<size_t>> & AlphaDet,
@@ -61,8 +59,7 @@ namespace sbd {
 
 
   std::vector<std::vector<size_t>>
-  DecodeAlphaDets(const std::string& filename,
-		  size_t norb) {
+  DecodeAlphaDetsBits(const std::string& filename, size_t norb) {
     // open binary file
     std::ifstream file(filename, std::ios::binary);
     if (!file) {
@@ -107,6 +104,17 @@ namespace sbd {
     return all_bit_sequences;
   }
 
+  det_vector<size_t, det_kind::half>
+  DecodeAlphaDets(const std::string& filename,
+		  size_t norb,
+		  size_t bit_length) {
+    auto all_bit_sequences = DecodeAlphaDetsBits(filename, norb);
+    change_bitlength(1, all_bit_sequences, bit_length);
+    det_vector<size_t, det_kind::half> result;
+    result.assign(all_bit_sequences.begin(), all_bit_sequences.end());
+    return result;
+  }
+
   void LoadFromAlphaDets(const std::string & filename,
 			 std::vector<std::vector<size_t>> & config,
 			 size_t norb,
@@ -119,9 +127,8 @@ namespace sbd {
 
     std::vector<std::vector<size_t>> alphadets;
     if( mpi_rank == mpi_root) {
-      alphadets = DecodeAlphaDets(filename,norb);
+      alphadets = DecodeAlphaDetsBits(filename,norb);
     }
-    int root = 0;
     MpiBcast(alphadets,mpi_root,comm);
 
     size_t Na = alphadets.size();
@@ -158,7 +165,7 @@ namespace sbd {
    */
 
   void LoadAlphaDets(const std::string & adetfile,
-		     std::vector<std::vector<size_t>> & adet,
+		     det_vector<size_t, det_kind::half> & adet,
 		     size_t bit_length,
 		     size_t total_bit_length) {
 
@@ -167,24 +174,21 @@ namespace sbd {
       if( !inadet.is_open() ) {
         throw std::runtime_error("Failed to open alpha det file.");
       }
+      std::vector<std::string> lines;
       std::string line;
-      std::deque<std::string> temp_lines;
       while( std::getline(inadet,line) ) {
-        temp_lines.push_back(std::move(line));
+        lines.push_back(std::move(line));
       }
-      std::vector<std::string> lines(temp_lines.begin(),temp_lines.end());
-      adet.resize(lines.size());
+      adet.resize(lines.size(),
+                  std::vector<size_t>((total_bit_length + bit_length - 1) / bit_length));
       for(size_t i=0; i < lines.size(); i++) {
         adet[i] = sbd::from_string(lines[i],bit_length,total_bit_length);
       }
     } else if ( sbd::get_extension(adetfile) == std::string("bin") ) {
-      adet = sbd::DecodeAlphaDets(adetfile,total_bit_length);
-      sbd::change_bitlength(1,adet,bit_length);
+      adet = sbd::DecodeAlphaDets(adetfile,total_bit_length,bit_length);
     }
     sbd::sort_bitarray(adet);
   }
-
-
 
 }
 
