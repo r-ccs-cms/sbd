@@ -98,11 +98,21 @@ namespace sbd {
 
 #pragma omp parallel
       {
-	// round-robin assignment of work to threads
-	size_t thread_id = omp_get_thread_num();
-	size_t ib_start = thread_id;
-	size_t ib_end   = brasize;
-	size_t reserve_size = brasize * num_terms / num_thread;
+	// Round-robin assignment of work to threads.
+	// When num_thread > 1, thread 0 is reserved for MPI overlap in mult()
+	// and receives no COO rows.  Threads 1..N-1 cover all brasize rows using
+	// a stride of num_compute = num_thread - 1.
+	// When num_thread == 1, thread 0 covers all rows (unchanged behaviour).
+	size_t thread_id  = omp_get_thread_num();
+	size_t ib_end     = brasize;
+	size_t num_compute = (num_thread > 1) ? (num_thread - 1) : size_t(1);
+	// ib_start: thread 0 gets ib_end (empty loop) when multi-threaded;
+	//           thread k>0 starts at k-1 so threads cover {0, 1, ..., N-2, N-1, ...}
+	size_t ib_start   = (num_thread > 1)
+	                      ? (thread_id > 0 ? thread_id - 1 : ib_end)
+	                      : size_t(0);
+	size_t reserve_size = (thread_id == 0 && num_thread > 1)
+	                      ? size_t(0) : brasize * num_terms / num_compute;
 	ih[task][thread_id].reserve(reserve_size);
 	jh[task][thread_id].reserve(reserve_size);
 	hij[task][thread_id].reserve(reserve_size);
@@ -113,7 +123,7 @@ namespace sbd {
 	int sign_count;
 	bool check;
 	
-	for(size_t ib=ib_start; ib < ib_end; ib+=num_thread) {
+	for(size_t ib=ib_start; ib < ib_end; ib+=num_compute) {
 
 	  vb = bs[ib];
 	  for(size_t n=0; n < H.o_.size(); n++) {

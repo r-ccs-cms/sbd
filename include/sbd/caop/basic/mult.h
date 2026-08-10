@@ -204,10 +204,12 @@ namespace sbd {
 	size_t thread_id   = omp_get_thread_num();
 
 	// Thread 0 starts the ring-shift into the next ping-pong buffer.
-	// MpiSlide blocks until data transfer completes, so thread 0 then
-	// falls through to the compute loop below.
+	// MpiSlide blocks until data transfer completes.
 	// Threads 1..N-1 proceed directly to compute — their work overlaps
 	// with thread 0's MPI blocking call.
+	// makeCAOpHam assigns no COO rows to thread 0 when num_thread > 1,
+	// so thread 0's compute loop below is a no-op in that case.
+	// When num_thread == 1, thread 0 does MPI then handles all rows.
 	if( thread_id == 0 && !last_task ) {
 	  int bslide = slide[task]-slide[task+1];
 	  MpiSlide(*twk_cur, *twk_next, bslide, b_comm);
