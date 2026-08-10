@@ -14,8 +14,8 @@ namespace sbd {
   template <typename ElemT, typename RealT>
   void Lanczos(const std::vector<ElemT> & hii,
 	       std::vector<ElemT> & W,
-	       const std::vector<std::vector<size_t>> & bs,
-	       const size_t bit_length,
+	       const det_vector<size_t> & bs,
+	       const int bit_length,
 	       const std::vector<int> & slide,
 	       const GeneralOp<ElemT> & Ham,
 	       bool sign,
@@ -24,8 +24,12 @@ namespace sbd {
 	       MPI_Comm t_comm,
 	       int max_iteration,
 	       int num_block,
-	       RealT eps) {
-    
+	       RealT eps
+#ifdef SBD_THRUST
+	       , CaopMultThrust<ElemT>& caop_driver
+#endif
+	       ) {
+
     char jobz = 'V';
     char uplo = 'U';
     int lda   = num_block;
@@ -63,14 +67,18 @@ namespace sbd {
       bool stop_it = false;
 
       for(int ib=0; ib < num_block; ib++) {
-	
+
 	n++;
 	int ii = ib + lda * ib;
 	int ij = ib + lda * (ib+1);
 	int ji = ib+1 + lda * ib;
 	mult(hii,C[ib],HC,
 	     bs,bit_length,
-	     slide,Ham,sign,h_comm,b_comm,t_comm);
+	     slide,Ham,sign,h_comm,b_comm,t_comm
+#ifdef SBD_THRUST
+	     , caop_driver
+#endif
+	     );
 	InnerProduct(C[ib],HC,Aii,b_comm);
 	A[ii] = GetReal(Aii);
 	for(int i=0; i < n; i++) {

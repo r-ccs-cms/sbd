@@ -5,14 +5,19 @@
 #ifndef SBD_CAOP_BASIC_MULT_H
 #define SBD_CAOP_BASIC_MULT_H
 
+#ifdef SBD_THRUST
+#include "sbd/caop/basic/mult_thrust.h"
+#endif
+
 namespace sbd {
 
+#ifndef SBD_THRUST
   template <typename ElemT>
   void mult(const std::vector<ElemT> & hd,
 	    const std::vector<ElemT> & wk,
 	    std::vector<ElemT> & wb,
-	    const std::vector<std::vector<size_t>> & bs,
-	    const size_t bit_length,
+	    const det_vector<size_t> & bs,
+	    const int bit_length,
 	    const std::vector<int> & slide,
 	    const GeneralOp<ElemT> & H,
 	    bool sign,
@@ -29,8 +34,8 @@ namespace sbd {
 
     std::vector<ElemT> twk;
     std::vector<ElemT> rwk;
-    std::vector<std::vector<size_t>> tbs;
-    std::vector<std::vector<size_t>> rbs;
+    det_vector<size_t> tbs;
+    det_vector<size_t> rbs;
 
     if( slide.size() != 0 ) {
       if( slide[0] != 0 ) {
@@ -41,6 +46,9 @@ namespace sbd {
 	tbs = bs;
       }
     }
+
+    det_vector<size_t> m1, m2;
+    H.PrecomputeMasks(bit_length, m1, m2);
 
     ElemT volp(1.0/(mpi_size_h*mpi_size_t));
 #pragma omp parallel for
@@ -63,47 +71,44 @@ namespace sbd {
 	std::vector<size_t> vb;
 	std::vector<size_t> vk;
 	int sign_count;
-	bool check;
 	size_t size_t_one = static_cast<size_t>(1);
-	
+
 #pragma omp for schedule(dynamic)
 	for(size_t ib = ib_start; ib < ib_end; ib++) {
 
 	  vb = bs[ib];
 	  for(size_t n=0; n < H.o_.size(); n++) {
+	    // fast reject: required bits absent or forbidden bits present
+	    {
+	      bool reject = false;
+	      for(size_t w=0; w < m1[n].size(); w++) {
+		if( (~vb[w] & m1[n][w]) || (vb[w] & m2[n][w]) ) {
+		  reject = true; break;
+		}
+	      }
+	      if( reject ) continue;
+	    }
+	    // survivor: construct ket and accumulate sign
 	    sign_count = 1;
 	    vk = vb;
-	    check = false;
 	    for(int k=0; k < H.o_[n].n_dag_; k++) {
-	      size_t q = static_cast<size_t>(H.o_[n].fops_[k].q_);
-	      size_t r = q / bit_length;
-	      size_t x = q % bit_length;
-	      if( ( vk[r] & ( size_t_one << x ) ) != 0 ) {
-		vk[r] = vk[r] ^ ( size_t_one << x );
-		if( sign ) {
-		  sign_count *= bit_string_sign_factor(vk,bit_length,x,r);
-		}
-	      } else {
-		check = true;
-		break;
+	      int q = H.o_[n].fops_[k].q_;
+	      int r = q / bit_length;
+	      int x = q % bit_length;
+	      vk[r] ^= ( size_t_one << x );
+	      if( sign ) {
+		sign_count *= bit_string_sign_factor(vk,bit_length,x,r);
 	      }
 	    }
-	    if( check ) continue;
-	    for(int k = H.o_[n].n_dag_; k < H.o_[n].fops_.size(); k++) {
-	      size_t q = static_cast<size_t>(H.o_[n].fops_[k].q_);
-	      size_t r = q / bit_length;
-	      size_t x = q % bit_length;
-	      if( ( vk[r] & ( size_t_one << x ) ) == 0 ) {
-		vk[r] = vk[r] | ( size_t_one << x );
-		if( sign ) {
-		  sign_count *= bit_string_sign_factor(vk,bit_length,x,r);
-		}
-	      } else {
-		check = true;
-		break;
+	    for(int k = H.o_[n].n_dag_; k < (int)H.o_[n].fops_.size(); k++) {
+	      int q = H.o_[n].fops_[k].q_;
+	      int r = q / bit_length;
+	      int x = q % bit_length;
+	      vk[r] |= ( size_t_one << x );
+	      if( sign ) {
+		sign_count *= bit_string_sign_factor(vk,bit_length,x,r);
 	      }
 	    }
-	    if( check ) continue;
 
 	    // we assume that tbs is aligned in ascending order
 	    /*
@@ -114,8 +119,8 @@ namespace sbd {
 					 });
 	    */
 	    auto itik = std::lower_bound(tbs.begin(),tbs.end(),vk,
-					 [](const std::vector<size_t> & x,
-					    const std::vector<size_t> & y) {
+					 [](const auto & x,
+					    const auto & y) {
 					   return sbd::less_from_back(x,y);
 					 });
 	    if( itik == tbs.end() ) continue;
@@ -138,8 +143,9 @@ namespace sbd {
     }
     MpiAllreduce(wb,MPI_SUM,t_comm);
     MpiAllreduce(wb,MPI_SUM,h_comm);
-    
+
   }
+#endif // !SBD_THRUST
 
   template <typename ElemT>
   void mult(const std::vector<ElemT> & hii,

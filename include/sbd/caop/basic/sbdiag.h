@@ -117,11 +117,11 @@ namespace sbd {
     void diag(const MPI_Comm & comm,
 	      const SBD & sbd_data,
 	      const GeneralOp<ElemT> & H,
-	      const std::vector<std::vector<size_t>> & basis,
+	      const det_vector<size_t> & basis,
 	      const std::string & loadname,
 	      const std::string & savename,
 	      double & energy,
-	      std::vector<std::vector<size_t>> & co_basis) {
+	      det_vector<size_t> & co_basis) {
       
       int mpi_master = 0;
       int mpi_rank; MPI_Comm_rank(comm,&mpi_rank);
@@ -151,7 +151,7 @@ namespace sbd {
       }
       double eps = sbd_data.eps;
       size_t system_size = sbd_data.system_size;
-      size_t bit_length = sbd_data.bit_length;
+      int bit_length = (int)sbd_data.bit_length;
       bool sign = sbd_data.sign;
 
       /**
@@ -196,14 +196,27 @@ namespace sbd {
 	auto time_start_davidson = std::chrono::high_resolution_clock::now();
 	std::vector<ElemT> hii;
 	makeCAOpHamDiagTerms(basis,bit_length,slide,H,hii);
+#ifdef SBD_THRUST
+	// caop_driver holds GPU resources across Davidson/Lanczos and the energy evaluation.
+	// Call reset() if H or the basis size changes between sbd::diag() calls.
+	CaopMultThrust<ElemT> caop_driver;
+#endif
 	if( method == 0 ) {
 	  Davidson(hii,W,basis,bit_length,slide,H,sign,
 		   h_comm,b_comm,t_comm,
-		   max_it,max_nb,max_iv,eps,seed);
+		   max_it,max_nb,max_iv,eps,seed
+#ifdef SBD_THRUST
+		   , caop_driver
+#endif
+		   );
 	} else if ( method == 2 ) {
 	  Lanczos(hii,W,basis,bit_length,slide,H,sign,
 		  h_comm,b_comm,t_comm,
-		  max_it,max_nb,eps);
+		  max_it,max_nb,eps
+#ifdef SBD_THRUST
+		  , caop_driver
+#endif
+		  );
 	}
 	auto time_end_davidson = std::chrono::high_resolution_clock::now();
 	auto elapsed_davidson_count = std::chrono::duration_cast<std::chrono::microseconds>(time_end_davidson-time_start_davidson).count();
@@ -224,7 +237,11 @@ namespace sbd {
 	auto time_start_mult = std::chrono::high_resolution_clock::now();
 	std::vector<ElemT> C(W.size(),0.0);
 	mult(hii,W,C,basis,bit_length,slide,H,sign,
-	     h_comm,b_comm,t_comm);
+	     h_comm,b_comm,t_comm
+#ifdef SBD_THRUST
+	     , caop_driver
+#endif
+	     );
 	auto time_end_mult = std::chrono::high_resolution_clock::now();
 	auto elapsed_mult_count = std::chrono::duration_cast<std::chrono::microseconds>(time_end_mult-time_start_mult).count();
         double elapsed_mult = 0.000001 * elapsed_mult_count;
@@ -349,7 +366,7 @@ namespace sbd {
 	      const std::string & loadname,
 	      const std::string & savename,
 	      double & energy,
-	      std::vector<std::vector<size_t>> & co_basis) {
+	      det_vector<size_t> & co_basis) {
 
       int mpi_master = 0;
       int mpi_rank; MPI_Comm_rank(comm,&mpi_rank);
@@ -409,7 +426,7 @@ namespace sbd {
 	std::cout << " " << make_timestamp()
 		  << " sbd: start load basis" << std::endl;
       }
-      std::vector<std::vector<size_t>> basis;
+      det_vector<size_t> basis;
       if( mpi_rank_h == 0 ) {
 	if( mpi_rank_t == 0 ) {
 	  load_basis_from_files(basisfiles,basis,

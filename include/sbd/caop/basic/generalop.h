@@ -14,6 +14,10 @@ namespace sbd {
   template <typename ElemT>
   class GeneralOp;
 
+#ifdef SBD_THRUST
+  template <typename ElemT_> class CaopMultThrust;
+#endif
+
   class CAOp {
   public:
     CAOp()
@@ -80,24 +84,27 @@ namespace sbd {
     friend void mult(const std::vector<ElemT_> & hd,
 		     const std::vector<ElemT_> & wk,
 		     std::vector<ElemT_> & wb,
-		     const std::vector<std::vector<size_t>> & bs,
-		     const size_t bit_length,
+		     const det_vector<size_t> & bs,
+		     const int bit_length,
 		     const std::vector<int> & slide,
 		     const GeneralOp<ElemT_> & H,
 		     bool sign,
 		     MPI_Comm h_comm,
 		     MPI_Comm b_comm,
 		     MPI_Comm t_comm);
+#ifdef SBD_THRUST
+    template <typename ElemT_> friend class CaopMultThrust;
+#endif
 
     template <typename ElemT_>
-    friend void makeCAOpHamDiagTerms(const std::vector<std::vector<size_t>> & bs,
+    friend void makeCAOpHamDiagTerms(const det_vector<size_t> & bs,
 				     const size_t bit_length,
 				     const std::vector<int> & slide,
 				     const GeneralOp<ElemT_> & H,
 				     std::vector<ElemT_> & hii);
 
     template <typename ElemT_>
-    friend void makeCAOpHam(const std::vector<std::vector<size_t>> & bs,
+    friend void makeCAOpHam(const det_vector<size_t> & bs,
 			    const size_t bit_length,
 			    const std::vector<int> & slide,
 			    const GeneralOp<ElemT_> & H,
@@ -330,24 +337,27 @@ namespace sbd {
     friend void mult(const std::vector<ElemT_> & hd,
 		     const std::vector<ElemT_> & wk,
 		     std::vector<ElemT_> & wb,
-		     const std::vector<std::vector<size_t>> & bs,
-		     const size_t bit_length,
+		     const det_vector<size_t> & bs,
+		     const int bit_length,
 		     const std::vector<int> & slide,
 		     const GeneralOp<ElemT_> & H,
 		     bool sign,
 		     MPI_Comm h_comm,
 		     MPI_Comm b_comm,
 		     MPI_Comm t_comm);
+#ifdef SBD_THRUST
+    template <typename ElemT_> friend class CaopMultThrust;
+#endif
 
     template <typename ElemT_>
-    friend void makeCAOpHamDiagTerms(const std::vector<std::vector<size_t>> & bs,
+    friend void makeCAOpHamDiagTerms(const det_vector<size_t> & bs,
 				     const size_t bit_length,
 				     const std::vector<int> & slide,
 				     const GeneralOp<ElemT_> & H,
 				     std::vector<ElemT_> & hii);
 
     template <typename ElemT_>
-    friend void makeCAOpHam(const std::vector<std::vector<size_t>> & bs,
+    friend void makeCAOpHam(const det_vector<size_t> & bs,
 			    const size_t bit_length,
 			    const std::vector<int> & slide,
 			    const GeneralOp<ElemT_> & H,
@@ -751,24 +761,27 @@ namespace sbd {
     friend void mult(const std::vector<ElemT_> & hd,
 		     const std::vector<ElemT_> & wk,
 		     std::vector<ElemT_> & wb,
-		     const std::vector<std::vector<size_t>> & bs,
-		     const size_t bit_length,
+		     const det_vector<size_t> & bs,
+		     const int bit_length,
 		     const std::vector<int> & slide,
 		     const GeneralOp<ElemT_> & H,
 		     bool sign,
 		     MPI_Comm h_comm,
 		     MPI_Comm b_comm,
 		     MPI_Comm t_comm);
+#ifdef SBD_THRUST
+    template <typename ElemT_> friend class CaopMultThrust;
+#endif
 
     template <typename ElemT_>
-    friend void makeCAOpHamDiagTerms(const std::vector<std::vector<size_t>> & bs,
+    friend void makeCAOpHamDiagTerms(const det_vector<size_t> & bs,
 				     const size_t bit_length,
 				     const std::vector<int> & slide,
 				     const GeneralOp<ElemT_> & H,
 				     std::vector<ElemT_> & hii);
 
     template <typename ElemT_>
-    friend void makeCAOpHam(const std::vector<std::vector<size_t>> & bs,
+    friend void makeCAOpHam(const det_vector<size_t> & bs,
 			    const size_t bit_length,
 			    const std::vector<int> & slide,
 			    const GeneralOp<ElemT_> & H,
@@ -803,6 +816,31 @@ namespace sbd {
     template <typename ElemT_>
     friend std::ostream & operator << (std::ostream & s,
 				       const GeneralOp<ElemT_> & gop);
+
+    // Compute per-term bitmasks for fast rejection in mult (method 0).
+    // m1[n]: bits that must be occupied in bra (creation targets in o_[n]).
+    // m2[n]: bits that must be unoccupied in bra (annihilation targets in o_[n]).
+    void PrecomputeMasks(size_t bit_length,
+                         det_vector<size_t>& m1,
+                         det_vector<size_t>& m2) const {
+      size_t det_words = (size_t)(max_index() / (int)bit_length) + 1;
+      std::vector<size_t> zero(det_words, 0);
+      m1 = det_vector<size_t>(o_.size(), zero);
+      m2 = det_vector<size_t>(o_.size(), zero);
+      for (size_t n = 0; n < o_.size(); n++) {
+        for (int k = 0; k < o_[n].n_dag_; k++) {
+          size_t q = (size_t)o_[n].fops_[k].q_;
+          m1[n][q / bit_length] |= (size_t(1) << (q % bit_length));
+        }
+        for (int k = o_[n].n_dag_; k < (int)o_[n].fops_.size(); k++) {
+          size_t q = (size_t)o_[n].fops_[k].q_;
+          m2[n][q / bit_length] |= (size_t(1) << (q % bit_length));
+        }
+        for (size_t w = 0; w < det_words; w++) {
+          m2[n][w] &= ~m1[n][w];
+        }
+      }
+    }
 
   private:
     std::vector<ElemT> e_; // coefficient for diagonal part

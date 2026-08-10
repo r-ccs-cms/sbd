@@ -14,7 +14,7 @@ namespace sbd {
 
   template <typename ElemT>
   void InitVectorCAOP(std::vector<ElemT> & w,
-		      const std::vector<std::vector<size_t>> & basis,
+		      const det_vector<size_t> & basis,
 		      MPI_Comm h_comm,
 		      MPI_Comm b_comm,
 		      MPI_Comm t_comm,
@@ -38,8 +38,8 @@ namespace sbd {
   template <typename ElemT, typename RealT>
   void Davidson(const std::vector<ElemT> & hii,
 		std::vector<ElemT> & W,
-		const std::vector<std::vector<size_t>> & bs,
-		const size_t bit_length,
+		const det_vector<size_t> & bs,
+		const int bit_length,
 		const std::vector<int> & slide,
 		const GeneralOp<ElemT> & Ham,
 		bool sign,
@@ -50,7 +50,11 @@ namespace sbd {
 		int num_block,
 		int num_initvec,
 		RealT eps,
-		size_t seed) {
+		size_t seed
+#ifdef SBD_THRUST
+		, CaopMultThrust<ElemT>& caop_driver
+#endif
+		) {
 
     // RealT eps_reg = 1.0e-12;
     size_t w_size = W.size();
@@ -113,7 +117,11 @@ namespace sbd {
 	Zero(HC[ib]);
 	mult(hii,C[ib],HC[ib],
 	     bs,bit_length,
-	     slide,Ham,sign,h_comm,b_comm,t_comm);
+	     slide,Ham,sign,h_comm,b_comm,t_comm
+#ifdef SBD_THRUST
+	     , caop_driver
+#endif
+	     );
 	for(int jb=0; jb <= ib; jb++) {
 	  InnerProduct(C[jb],HC[ib],H[jb+nb*ib],b_comm);
 	  H[ib+nb*jb] = Conjugate(H[jb+nb*ib]);
@@ -237,6 +245,7 @@ namespace sbd {
     
   }
 		
+
   template <typename ElemT, typename RealT>
   void Davidson(const std::vector<ElemT> & hii,
 		const std::vector<std::vector<std::vector<size_t>>> & ih,
