@@ -23,6 +23,20 @@
       }
     },
     {
+      "name": "fugaku-llvm",
+      "displayName": "Fugaku A64FX — LLVM/Clang + OpenBLAS (recommended CPU build)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/fugaku-llvm",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/fugaku-llvm.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_FLAGS":  "-O3 -fopenmp",
+        "SBD_GPU_BACKEND":  "none",
+        "BLAS_LIBRARIES":   "/vol0004/apps/oss/spack-v1.0.1/opt/spack/linux-a64fx/openblas-0.3.30-tayl3edqrmltxa7fylvolkjwg4rvj3gg/lib/libopenblas.so",
+        "LAPACK_LIBRARIES": "/vol0004/apps/oss/spack-v1.0.1/opt/spack/linux-a64fx/openblas-0.3.30-tayl3edqrmltxa7fylvolkjwg4rvj3gg/lib/libopenblas.so"
+      }
+    },
+    {
       "name": "craype-thrust",
       "displayName": "Cray PE + nvc++ Thrust (GH200 / cc90)",
       "generator": "Unix Makefiles",
@@ -76,6 +90,7 @@
   "buildPresets": [
     { "name": "macos-cpu",     "configurePreset": "macos-cpu" },
     { "name": "linux-cpu",     "configurePreset": "linux-cpu" },
+    { "name": "fugaku-llvm",   "configurePreset": "fugaku-llvm" },
     { "name": "craype-thrust", "configurePreset": "craype-thrust" },
     { "name": "nvhpc-thrust",  "configurePreset": "nvhpc-thrust" },
     { "name": "omp5-nvidia",   "configurePreset": "omp5-nvidia" },
