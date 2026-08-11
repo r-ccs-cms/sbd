@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <iomanip>
 
+#include <omp.h>
+
 #include "sbd/framework/type_def.h"
 #include "sbd/framework/mpi_utility.h"
 #include "sbd/framework/bit_manipulation.h"
@@ -327,16 +329,25 @@ namespace sbd {
       my_first = rem * (base + 1) + (mpi_rank - rem) * base;
     }
     const int my_last = my_first + my_count;
-    
-    for (int i = my_first; i < my_last; ++i) {
-      const std::string & fname = all_filenames[i];
-      
-      Container local;
-      load_basis_from_file(fname, local, bit_length, total_bit_length);
-      
+    (void)my_last;  // kept for readability; loop now uses my_count directly
+
+    // Load each assigned file in parallel: one OMP thread per file.
+    // Threads write to private per_file[i] containers — no shared mutable state.
+    std::vector<Container> per_file(my_count);
+    {
+      const int nthreads = std::min(my_count, omp_get_max_threads());
+      #pragma omp parallel for schedule(static) num_threads(nthreads)
+      for (int i = 0; i < my_count; ++i) {
+        load_basis_from_file(all_filenames[my_first + i], per_file[i],
+                             bit_length, total_bit_length);
+      }
+    }
+
+    // Merge per-file results into config in file order (sequential).
+    for (int i = 0; i < my_count; ++i) {
       config.insert(config.end(),
-		    std::make_move_iterator(local.begin()),
-		    std::make_move_iterator(local.end()));
+		    std::make_move_iterator(per_file[i].begin()),
+		    std::make_move_iterator(per_file[i].end()));
     }
     sort_bitarray(config);
   }
