@@ -7,6 +7,7 @@
 
 #include <sys/stat.h>
 #include <iomanip>
+#include <atomic>
 
 #include <omp.h>
 
@@ -225,21 +226,31 @@ namespace sbd {
       if( !ifs )
 	throw std::runtime_error("Failed to read basis bit-string file.");
 
+      // Pre-allocate all inner vectors before the parallel region so that
+      // each thread's resize()+fill() operates on already-constructed objects.
+      // This avoids false sharing on the outer vector's metadata while still
+      // allowing each thread to do its own small heap allocations with minimal
+      // allocator contention (modern allocators use per-thread arenas).
       config.resize(num_records);
+
+      std::atomic<bool> parse_error{false};
+      #pragma omp parallel for schedule(static)
       for(size_t i = 0; i < num_records; i++) {
-	const char* rec = buf.data() + i * record_size;
-	config[i].resize(num_words);
-	std::fill(config[i].begin(), config[i].end(), size_t(0));
-	for(size_t j = 0; j < total_bit_length; j++) {
-	  if( rec[j] == '1' ) {
-	    size_t bit_idx = total_bit_length - 1 - j;
-	    config[i][bit_idx / bit_length] |= (size_t(1) << (bit_idx % bit_length));
-	  } else if( rec[j] != '0' ) {
-	    throw std::runtime_error(
-	      "Unexpected character in basis file: expected '0' or '1'");
-	  }
-	}
+        config[i].resize(num_words);
+        std::fill(config[i].begin(), config[i].end(), size_t(0));
+        const char* rec = buf.data() + i * record_size;
+        for(size_t j = 0; j < total_bit_length; j++) {
+          if( rec[j] == '1' ) {
+            size_t bit_idx = total_bit_length - 1 - j;
+            config[i][bit_idx / bit_length] |= (size_t(1) << (bit_idx % bit_length));
+          } else if( rec[j] != '0' ) {
+            parse_error.store(true, std::memory_order_relaxed);
+          }
+        }
       }
+      if( parse_error.load() )
+        throw std::runtime_error(
+          "Unexpected character in basis file: expected '0' or '1'");
     } else if ( get_extension(filename) == std::string("bin") ) {
       std::ifstream ifs(filename, std::ios::binary);
       if( !ifs.is_open() ) {
@@ -329,25 +340,17 @@ namespace sbd {
       my_first = rem * (base + 1) + (mpi_rank - rem) * base;
     }
     const int my_last = my_first + my_count;
-    (void)my_last;  // kept for readability; loop now uses my_count directly
+    (void)my_last;  // kept for readability
 
-    // Load each assigned file in parallel: one OMP thread per file.
-    // Threads write to private per_file[i] containers — no shared mutable state.
-    std::vector<Container> per_file(my_count);
-    {
-      const int nthreads = std::min(my_count, omp_get_max_threads());
-      #pragma omp parallel for schedule(static) num_threads(nthreads)
-      for (int i = 0; i < my_count; ++i) {
-        load_basis_from_file(all_filenames[my_first + i], per_file[i],
-                             bit_length, total_bit_length);
-      }
-    }
-
-    // Merge per-file results into config in file order (sequential).
-    for (int i = 0; i < my_count; ++i) {
+    // Load files sequentially so concurrent reads don't contend on shared
+    // filesystem bandwidth; parallelism is in the per-record parse (see
+    // load_basis_from_file).
+    for (int i = my_first; i < my_first + my_count; ++i) {
+      Container local;
+      load_basis_from_file(all_filenames[i], local, bit_length, total_bit_length);
       config.insert(config.end(),
-		    std::make_move_iterator(per_file[i].begin()),
-		    std::make_move_iterator(per_file[i].end()));
+		    std::make_move_iterator(local.begin()),
+		    std::make_move_iterator(local.end()));
     }
     sort_bitarray(config);
   }
