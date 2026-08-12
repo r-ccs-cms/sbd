@@ -177,53 +177,50 @@ public:
         storage.resize(size);
         base_memory = (size_t*)thrust::raw_pointer_cast(storage.data());
 
+        // Single host staging buffer; one H2D for all excitation blocks.
+        std::vector<size_t> staging(size);
         size_t count = 0;
 
-        // Stage each excitation-list block on the host then do one bulk H2D
-        // transfer, replacing a thrust::copy_n per bra row (and thrust::fill_n
-        // for bra indices). When store_offset is false the layout is
-        // [ket block][bra block] contiguous, so both fit in one transfer.
-        auto upload_rows = [&](auto SM, auto Len, const std::vector<size_t> &offset,
-                               size_t braSize, size_t total, size_t braStart, bool with_bra) {
-            std::vector<size_t> buf(with_bra ? total * 2 : total);
+        auto fill_block = [&](auto SM, auto Len, const std::vector<size_t> &offset,
+                              size_t braSize, size_t total, size_t braStart, bool with_bra) {
+            const size_t base = count;
 #pragma omp parallel for
             for (size_t i = 0; i < braSize; i++) {
                 const size_t off = offset[i];
                 const size_t len = Len[i];
                 for (size_t j = 0; j < len; j++) {
-                    buf[off + j] = SM[i][j];
+                    staging[base + off + j] = SM[i][j];
                 }
                 if (with_bra) {
                     for (size_t j = 0; j < len; j++) {
-                        buf[total + off + j] = i + braStart;
+                        staging[base + total + off + j] = i + braStart;
                     }
                 }
             }
-            thrust::copy_n(buf.begin(), buf.size(), storage.begin() + count);
         };
 
         if (store_offset) {
             // store offsets for non-collapsed loop calculation
             if (taskType != 1) {
                 SinglesFromAlphaOffset = base_memory + count;
-                thrust::copy_n(offset_single_alpha.begin(), braAlphaSize + 1, storage.begin() + count);
+                std::copy_n(offset_single_alpha.data(), braAlphaSize + 1, staging.data() + count);
                 count += braAlphaSize + 1;
 
                 if (taskType == 2) {
                     DoublesFromAlphaOffset = base_memory + count;
-                    thrust::copy_n(offset_double_alpha.begin(), braAlphaSize + 1, storage.begin() + count);
+                    std::copy_n(offset_double_alpha.data(), braAlphaSize + 1, staging.data() + count);
                     count += braAlphaSize + 1;
                 }
             }
 
             if (taskType != 2) {
                 SinglesFromBetaOffset = base_memory + count;
-                thrust::copy_n(offset_single_beta.begin(), braBetaSize + 1, storage.begin() + count);
+                std::copy_n(offset_single_beta.data(), braBetaSize + 1, staging.data() + count);
                 count += braBetaSize + 1;
 
                 if (taskType == 1) {
                     DoublesFromBetaOffset = base_memory + count;
-                    thrust::copy_n(offset_double_beta.begin(), braBetaSize + 1, storage.begin() + count);
+                    std::copy_n(offset_double_beta.data(), braBetaSize + 1, staging.data() + count);
                     count += braBetaSize + 1;
                 }
             }
@@ -240,7 +237,7 @@ public:
                 SinglesFromAlphaKetIndex = base_memory + count;
                 SinglesFromAlphaBraIndex = base_memory + count + size_single_alpha;
             }
-            upload_rows(helper.SinglesFromAlphaSM, helper.SinglesFromAlphaLen,
+            fill_block(helper.SinglesFromAlphaSM, helper.SinglesFromAlphaLen,
                         offset_single_alpha, braAlphaSize, size_single_alpha,
                         helper.braAlphaStart, !store_offset);
 #ifdef SBD_DEBUG
@@ -270,7 +267,7 @@ public:
                     DoublesFromAlphaKetIndex = base_memory + count;
                     DoublesFromAlphaBraIndex = base_memory + count + size_double_alpha;
                 }
-                upload_rows(helper.DoublesFromAlphaSM, helper.DoublesFromAlphaLen,
+                fill_block(helper.DoublesFromAlphaSM, helper.DoublesFromAlphaLen,
                             offset_double_alpha, braAlphaSize, size_double_alpha,
                             helper.braAlphaStart, !store_offset);
                 count += size_double_alpha;
@@ -291,7 +288,7 @@ public:
                 SinglesFromBetaKetIndex = base_memory + count;
                 SinglesFromBetaBraIndex = base_memory + count + size_single_beta;
             }
-            upload_rows(helper.SinglesFromBetaSM, helper.SinglesFromBetaLen,
+            fill_block(helper.SinglesFromBetaSM, helper.SinglesFromBetaLen,
                         offset_single_beta, braBetaSize, size_single_beta,
                         helper.braBetaStart, !store_offset);
 #ifdef SBD_DEBUG
@@ -321,7 +318,7 @@ public:
                     DoublesFromBetaKetIndex = base_memory + count;
                     DoublesFromBetaBraIndex = base_memory + count + size_double_beta;
                 }
-                upload_rows(helper.DoublesFromBetaSM, helper.DoublesFromBetaLen,
+                fill_block(helper.DoublesFromBetaSM, helper.DoublesFromBetaLen,
                             offset_double_beta, braBetaSize, size_double_beta,
                             helper.braBetaStart, !store_offset);
                 count += size_double_beta;
@@ -330,6 +327,9 @@ public:
                 }
             }
         }
+
+        // single H2D for all excitation blocks
+        thrust::copy_n(staging.begin(), size, storage.begin());
 
         // convert CrAn from AoS to SoA
         size_t count_cran = 0;
