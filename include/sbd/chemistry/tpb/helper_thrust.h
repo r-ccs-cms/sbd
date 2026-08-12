@@ -443,8 +443,10 @@ public:
         std::vector<size_t> permutation;
         // constexpr size_t block_size = 16;
         constexpr size_t block_size = 32;
+#ifdef SBD_DEBUG_HELPER
         printf("[%s,%d] Reordering index arrays (block_size=%zu)\n",
                __FILE__, __LINE__, block_size);
+#endif
         // NOTE:
         // block_size controls the trade-off between improving locality
         // of KetIndex-based accesses and preserving BraIndex locality.
@@ -537,8 +539,10 @@ public:
 
         // Reorder alpha single-excitation arrays
         if (size_single_alpha > 0 && SinglesFromAlphaKetIndex) {
+#ifdef SBD_DEBUG_HELPER
             printf("[%s,%d] Reordering index arrays (size_single_alpha=%zu)\n",
                    __FILE__, __LINE__, size_single_alpha);
+#endif
             setup_permutation(SinglesFromAlphaKetIndex, size_single_alpha);
             reorder_device_array(SinglesFromAlphaKetIndex);
             reorder_device_array(SinglesFromAlphaBraIndex);
@@ -550,8 +554,10 @@ public:
 
         // Reorder beta single-excitation arrays
         if (size_single_beta > 0 && SinglesFromBetaKetIndex) {
+#ifdef SBD_DEBUG_HELPER
             printf("[%s,%d] Reordering index arrays (size_single_beta=%zu)\n",
                    __FILE__, __LINE__, size_single_beta);
+#endif
             setup_permutation(SinglesFromBetaKetIndex, size_single_beta);
             reorder_device_array(SinglesFromBetaKetIndex);
             reorder_device_array(SinglesFromBetaBraIndex);
@@ -563,8 +569,10 @@ public:
 
         // Reorder alpha double-excitation arrays
         if (size_double_alpha > 0 && DoublesFromAlphaKetIndex) {
+#ifdef SBD_DEBUG_HELPER
             printf("[%s,%d] Reordering index arrays (size_double_alpha=%zu)\n",
                    __FILE__, __LINE__, size_double_alpha);
+#endif
             setup_permutation(DoublesFromAlphaKetIndex, size_double_alpha);
             reorder_device_array(DoublesFromAlphaKetIndex);
             reorder_device_array(DoublesFromAlphaBraIndex);
@@ -578,8 +586,10 @@ public:
 
         // Reorder beta double-excitation arrays
         if (size_double_beta > 0 && DoublesFromBetaKetIndex) {
+#ifdef SBD_DEBUG_HELPER
             printf("[%s,%d] Reordering index arrays (size_double_beta=%zu)\n",
                    __FILE__, __LINE__, size_double_beta);
+#endif
             setup_permutation(DoublesFromBetaKetIndex, size_double_beta);
             reorder_device_array(DoublesFromBetaKetIndex);
             reorder_device_array(DoublesFromBetaBraIndex);
