@@ -5,8 +5,10 @@
 #ifndef SBD_CHEMISTRY_TPB_MULT_THRUST_H
 #define SBD_CHEMISTRY_TPB_MULT_THRUST_H
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <vector>
 
 #ifdef SBD_USE_NCCL
 #include <nccl.h>
@@ -203,14 +205,23 @@ void MultTPBThrust<ElemT>::Init(
         bdets_size = std::max(bdets_size, helper[task].braBetaEnd - helper[task].braBetaStart);
     }
 
-    // copyin adets, bdets
+    // copyin adets, bdets: staged through a host buffer for one bulk H2D transfer.
     adets.resize(this->D_half_size_ * adets_in.size());
     bdets.resize(this->D_half_size_ * bdets_in.size());
-    for (int i = 0; i < adets_in.size(); i++) {
-        thrust::copy_n(adets_in[i].begin(), this->D_half_size_, adets.begin() + i * this->D_half_size_);
-    }
-    for (int i = 0; i < bdets_in.size(); i++) {
-        thrust::copy_n(bdets_in[i].begin(), this->D_half_size_, bdets.begin() + i * this->D_half_size_);
+    {
+        std::vector<size_t> buf(this->D_half_size_ * adets_in.size());
+#pragma omp parallel for
+        for (size_t i = 0; i < adets_in.size(); i++) {
+            std::copy_n(adets_in[i].begin(), this->D_half_size_, buf.begin() + i * this->D_half_size_);
+        }
+        thrust::copy_n(buf.begin(), buf.size(), adets.begin());
+
+        buf.resize(this->D_half_size_ * bdets_in.size());
+#pragma omp parallel for
+        for (size_t i = 0; i < bdets_in.size(); i++) {
+            std::copy_n(bdets_in[i].begin(), this->D_half_size_, buf.begin() + i * this->D_half_size_);
+        }
+        thrust::copy_n(buf.begin(), buf.size(), bdets.begin());
     }
 
     dets_size = 0;

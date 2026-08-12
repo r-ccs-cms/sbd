@@ -6,6 +6,7 @@
 #define SBD_CHEMISTRY_TPB_HELPER_THRUST_H
 
 #include <cassert>
+#include <vector>
 
 #include "sbd/chemistry/tpb/helper.h"
 #include <thrust/device_vector.h>
@@ -177,6 +178,30 @@ public:
         base_memory = (size_t*)thrust::raw_pointer_cast(storage.data());
 
         size_t count = 0;
+
+        // Stage each excitation-list block on the host then do one bulk H2D
+        // transfer, replacing a thrust::copy_n per bra row (and thrust::fill_n
+        // for bra indices). When store_offset is false the layout is
+        // [ket block][bra block] contiguous, so both fit in one transfer.
+        auto upload_rows = [&](auto SM, auto Len, const std::vector<size_t> &offset,
+                               size_t braSize, size_t total, size_t braStart, bool with_bra) {
+            std::vector<size_t> buf(with_bra ? total * 2 : total);
+#pragma omp parallel for
+            for (size_t i = 0; i < braSize; i++) {
+                const size_t off = offset[i];
+                const size_t len = Len[i];
+                for (size_t j = 0; j < len; j++) {
+                    buf[off + j] = SM[i][j];
+                }
+                if (with_bra) {
+                    for (size_t j = 0; j < len; j++) {
+                        buf[total + off + j] = i + braStart;
+                    }
+                }
+            }
+            thrust::copy_n(buf.begin(), buf.size(), storage.begin() + count);
+        };
+
         if (store_offset) {
             // store offsets for non-collapsed loop calculation
             if (taskType != 1) {
@@ -215,28 +240,24 @@ public:
                 SinglesFromAlphaKetIndex = base_memory + count;
                 SinglesFromAlphaBraIndex = base_memory + count + size_single_alpha;
             }
-            for(size_t i=0; i < braAlphaSize; i++) {
-                thrust::copy_n(helper.SinglesFromAlphaSM[i], helper.SinglesFromAlphaLen[i], storage.begin() + count + offset_single_alpha[i]);
+            upload_rows(helper.SinglesFromAlphaSM, helper.SinglesFromAlphaLen,
+                        offset_single_alpha, braAlphaSize, size_single_alpha,
+                        helper.braAlphaStart, !store_offset);
 #ifdef SBD_DEBUG
-                // **** DEBUG ****
+            // **** DEBUG ****
+            for(size_t i=0; i < braAlphaSize; i++) {
                 printf("[%s,%d] SinglesFromAlphaKetIndex: i=%llu, n=%llu, ", __FILE__, __LINE__,
                        i, helper.SinglesFromAlphaLen[i]);
                 for(size_t j=0; j <helper.SinglesFromAlphaLen[i];j++) {
                     printf(" %llu:%llu,", j, helper.SinglesFromAlphaSM[i][j]);
                 }
                 printf("\n");
-#endif
-            }
-            if (!store_offset) {
-                for(size_t i=0; i < braAlphaSize; i++) {
-                    thrust::fill_n(storage.begin() + size_single_alpha + count + offset_single_alpha[i], helper.SinglesFromAlphaLen[i], i + helper.braAlphaStart);
-#ifdef SBD_DEBUG
-                    // **** DEBUG ****
+                if (!store_offset) {
                     printf("[%s,%d] SinglesFromAlphaBraIndex: i=%llu, n=%llu, offset=%llu\n", __FILE__, __LINE__,
                            i, helper.SinglesFromAlphaLen[i], offset_single_alpha[i] );
-#endif
                 }
             }
+#endif
             count += size_single_alpha;
             if (!store_offset) {
                 count += size_single_alpha;
@@ -249,12 +270,9 @@ public:
                     DoublesFromAlphaKetIndex = base_memory + count;
                     DoublesFromAlphaBraIndex = base_memory + count + size_double_alpha;
                 }
-                for(size_t i=0; i < braAlphaSize; i++) {
-                    thrust::copy_n(helper.DoublesFromAlphaSM[i], helper.DoublesFromAlphaLen[i], storage.begin() + count + offset_double_alpha[i]);
-                    if (!store_offset) {
-                        thrust::fill_n(storage.begin() + count + size_double_alpha + offset_double_alpha[i], helper.DoublesFromAlphaLen[i], i + helper.braAlphaStart);
-                    }
-                }
+                upload_rows(helper.DoublesFromAlphaSM, helper.DoublesFromAlphaLen,
+                            offset_double_alpha, braAlphaSize, size_double_alpha,
+                            helper.braAlphaStart, !store_offset);
                 count += size_double_alpha;
                 if (!store_offset) {
                     count += size_double_alpha;
@@ -273,28 +291,24 @@ public:
                 SinglesFromBetaKetIndex = base_memory + count;
                 SinglesFromBetaBraIndex = base_memory + count + size_single_beta;
             }
-            for(size_t i=0; i < braBetaSize; i++) {
-                thrust::copy_n(helper.SinglesFromBetaSM[i], helper.SinglesFromBetaLen[i], storage.begin() + count + offset_single_beta[i]);
+            upload_rows(helper.SinglesFromBetaSM, helper.SinglesFromBetaLen,
+                        offset_single_beta, braBetaSize, size_single_beta,
+                        helper.braBetaStart, !store_offset);
 #ifdef SBD_DEBUG
-                // **** DEBUG ****
+            // **** DEBUG ****
+            for(size_t i=0; i < braBetaSize; i++) {
                 printf("[%s,%d] SinglesFromBetaKetIndex: i=%llu, n=%llu, ", __FILE__, __LINE__,
                        i, helper.SinglesFromBetaLen[i]);
                 for(size_t j=0; j <helper.SinglesFromBetaLen[i];j++) {
                     printf(" %llu:%llu,", j, helper.SinglesFromBetaSM[i][j]);
                 }
                 printf("\n");
-#endif
-            }
-            if (!store_offset) {
-                for(size_t i=0; i < braBetaSize; i++) {
-                    thrust::fill_n(storage.begin() + count + size_single_beta + offset_single_beta[i], helper.SinglesFromBetaLen[i], i + helper.braBetaStart);
-#ifdef SBD_DEBUG
-                    // **** DEBUG ****
+                if (!store_offset) {
                     printf("[%s,%d] SinglesFromBetaBraIndex: i=%llu, n=%llu, offset=%llu\n", __FILE__, __LINE__,
                            i, helper.SinglesFromBetaLen[i], offset_single_beta[i] );
-#endif
                 }
             }
+#endif
             count += size_single_beta;
             if (!store_offset) {
                 count += size_single_beta;
@@ -307,12 +321,9 @@ public:
                     DoublesFromBetaKetIndex = base_memory + count;
                     DoublesFromBetaBraIndex = base_memory + count + size_double_beta;
                 }
-                for(size_t i=0; i < braBetaSize; i++) {
-                    thrust::copy_n(helper.DoublesFromBetaSM[i], helper.DoublesFromBetaLen[i], storage.begin() + count + offset_double_beta[i]);
-                    if (!store_offset) {
-                        thrust::fill_n(storage.begin() + count + size_double_beta + offset_double_beta[i], helper.DoublesFromBetaLen[i], i + helper.braBetaStart);
-                    }
-                }
+                upload_rows(helper.DoublesFromBetaSM, helper.DoublesFromBetaLen,
+                            offset_double_beta, braBetaSize, size_double_beta,
+                            helper.braBetaStart, !store_offset);
                 count += size_double_beta;
                 if (!store_offset) {
                     count += size_double_beta;
