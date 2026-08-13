@@ -7,6 +7,7 @@
 
 #include <mpi.h>
 
+#include <complex>
 #include <cstddef>
 #include <iostream>
 #include <string>
@@ -47,7 +48,6 @@ void aligned_reference(
     const ElemT& scalar_integral,
     const sbd::oneInt<ElemT>& one_integrals,
     const sbd::twoInt<ElemT>& two_integrals,
-    int type,
     double cutoff,
     sbd::det_vector<std::size_t>& expanded,
     MPI_Comm b_comm,
@@ -73,23 +73,9 @@ void aligned_reference(
       coefficients.begin() + begin, coefficients.begin() + end);
 
   expanded.clear();
-  if(type == 0) {
-    sbd::gdb::local_heatbath_expansion(
-        local_determinants, local_coefficients, bit_length, norb,
-        scalar_integral, one_integrals, two_integrals, cutoff, 0, expanded);
-  } else {
-    sbd::det_vector<std::size_t, sbd::det_kind::half> alpha_determinants;
-    sbd::det_vector<std::size_t, sbd::det_kind::half> beta_determinants;
-    std::vector<std::size_t> alpha_counts;
-    std::vector<std::size_t> beta_counts;
-    sbd::gdb::getHalfDets(local_determinants, bit_length, norb,
-                          alpha_determinants, beta_determinants,
-                          alpha_counts, beta_counts);
-    sbd::gdb::local_heatbath_expansion_lookup(
-        local_determinants, alpha_determinants, beta_determinants,
-        alpha_counts, beta_counts, local_coefficients, bit_length, norb,
-        scalar_integral, one_integrals, two_integrals, cutoff, 0, expanded);
-  }
+  sbd::gdb::local_heatbath_expansion(
+      local_determinants, local_coefficients, bit_length, norb,
+      scalar_integral, one_integrals, two_integrals, cutoff, 0, expanded);
 
   sbd::sort_global_bitarray(expanded, comm);
   sbd::redistribution_bitarray(expanded, comm);
@@ -142,7 +128,7 @@ int main(int argc, char** argv) {
   sbd::SetupIntegrals(fcidump, norb, nelec, scalar_integral,
                       one_integrals, two_integrals);
 
-  constexpr std::size_t bit_length = 20;
+  constexpr std::size_t bit_length = 64;
   const std::size_t spin_orbitals = 2 * static_cast<std::size_t>(norb);
   sbd::det_vector<std::size_t>::init_elem_size(
       (spin_orbitals + bit_length - 1) / bit_length);
@@ -167,29 +153,87 @@ int main(int argc, char** argv) {
     coefficients = {0.31, 0.17};
   }
 
-  constexpr double cutoff = 0.01;
   bool all_modes_match = true;
-  for(int type = 0; type <= 1; ++type) {
+  const std::vector<double> cutoffs{0.1, 0.01, 0.001};
+  const std::vector<std::size_t> batch_sizes{1, 1000000};
+  for(int truncated = 0; truncated <= 1; ++truncated) {
+    sbd::det_vector<std::size_t> input_determinants = determinants;
+    std::vector<double> input_coefficients = coefficients;
+    if(truncated != 0) {
+      input_determinants.resize(1);
+      input_coefficients.resize(1);
+    }
+    for(const double cutoff : cutoffs) {
+      sbd::det_vector<std::size_t> expected;
+      aligned_reference(
+          input_determinants, input_coefficients, bit_length,
+          static_cast<std::size_t>(norb), scalar_integral, one_integrals,
+          two_integrals, cutoff, expected, b_comm, comm);
+
+      for(const std::size_t batch_size : batch_sizes) {
+        for(int type = 0; type <= 1; ++type) {
+          sbd::det_vector<std::size_t> actual;
+          sbd::gdb::HeatbathExpansion(
+              input_determinants, input_coefficients, bit_length,
+              static_cast<std::size_t>(norb), scalar_integral, one_integrals,
+              two_integrals, type, cutoff, batch_size,
+              actual, b_comm, comm);
+
+          const int local_match = same_determinants(actual, expected) ? 1 : 0;
+          int global_match = 0;
+          MPI_Allreduce(&local_match, &global_match, 1, MPI_INT, MPI_MIN, comm);
+          all_modes_match = all_modes_match && global_match;
+          if(rank == 0) {
+            std::cout << "layout=" << replicated_dimension
+                      << " truncated=" << truncated
+                      << " cutoff=" << cutoff
+                      << " batch=" << batch_size
+                      << " type=" << type << " match: "
+                      << (global_match ? "yes" : "NO") << '\n';
+          }
+        }
+      }
+    }
+  }
+
+  std::complex<double> complex_scalar_integral;
+  sbd::oneInt<std::complex<double>> complex_one_integrals;
+  sbd::twoInt<std::complex<double>> complex_two_integrals;
+  int complex_norb = 0;
+  int complex_nelec = 0;
+  sbd::SetupIntegrals(
+      fcidump, complex_norb, complex_nelec, complex_scalar_integral,
+      complex_one_integrals, complex_two_integrals);
+  std::vector<std::complex<double>> complex_coefficients;
+  for(std::size_t i = 0; i < coefficients.size(); ++i) {
+    const double imaginary_part = (i % 2 == 0) ? 0.13 : -0.07;
+    complex_coefficients.emplace_back(coefficients[i], imaginary_part);
+  }
+  for(const double cutoff : cutoffs) {
     sbd::det_vector<std::size_t> expected;
     aligned_reference(
-        determinants, coefficients, bit_length,
-        static_cast<std::size_t>(norb), scalar_integral, one_integrals,
-        two_integrals, type, cutoff, expected, b_comm, comm);
-
-    sbd::det_vector<std::size_t> actual;
-    sbd::gdb::HeatbathExpansion(
-        determinants, coefficients, bit_length,
-        static_cast<std::size_t>(norb), scalar_integral, one_integrals,
-        two_integrals, type, cutoff, 0, actual, b_comm, comm);
-
-    const int local_match = same_determinants(actual, expected) ? 1 : 0;
-    int global_match = 0;
-    MPI_Allreduce(&local_match, &global_match, 1, MPI_INT, MPI_MIN, comm);
-    all_modes_match = all_modes_match && global_match;
-    if(rank == 0) {
-      std::cout << "layout=" << replicated_dimension << " type=" << type
-                << " determinant/coefficient slices match: "
-                << (global_match ? "yes" : "NO") << '\n';
+        determinants, complex_coefficients, bit_length,
+        static_cast<std::size_t>(complex_norb), complex_scalar_integral,
+        complex_one_integrals, complex_two_integrals, cutoff,
+        expected, b_comm, comm);
+    for(const std::size_t batch_size : batch_sizes) {
+      sbd::det_vector<std::size_t> actual;
+      sbd::gdb::HeatbathExpansion(
+          determinants, complex_coefficients, bit_length,
+          static_cast<std::size_t>(complex_norb), complex_scalar_integral,
+          complex_one_integrals, complex_two_integrals, 1, cutoff, batch_size,
+          actual, b_comm, comm);
+      const int local_match = same_determinants(actual, expected) ? 1 : 0;
+      int global_match = 0;
+      MPI_Allreduce(&local_match, &global_match, 1, MPI_INT, MPI_MIN, comm);
+      all_modes_match = all_modes_match && global_match;
+      if(rank == 0) {
+        std::cout << "layout=" << replicated_dimension
+                  << " complex=1 cutoff=" << cutoff
+                  << " batch=" << batch_size
+                  << " type=1 match: "
+                  << (global_match ? "yes" : "NO") << '\n';
+      }
     }
   }
 
