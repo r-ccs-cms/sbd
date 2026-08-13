@@ -534,6 +534,64 @@ namespace sbd {
         t_done - t0);
       fflush(stderr);
 
+      // ---- Global sorted-and-no-cross-shard-dup check -------------------------
+      // Send this rank's last element to rank+1; rank+1 verifies its first
+      // element is strictly greater.  Cost: one MPI_Sendrecv of row_len*8 bytes.
+      // Catches overlapping shard ranges (e.g. round-robin gen_bits.py output)
+      // that are individually sorted but collectively non-monotone across ranks.
+      if (mpi_size > 1) {
+        const size_t row_len = (config.empty() ? 0 : config.elem_size());
+        size_t max_row_len = 0;
+        MPI_Allreduce(&row_len, &max_row_len, 1, SBD_MPI_SIZE_T, MPI_MAX, comm);
+
+        if (max_row_len > 0) {
+          // Send last element (or all-zeros sentinel if this rank is empty).
+          std::vector<size_t> send_buf(max_row_len, 0);
+          if (!config.empty()) {
+            const auto& last = config[config.size() - 1];
+            std::memcpy(send_buf.data(), last.data(), max_row_len * sizeof(size_t));
+          }
+          std::vector<size_t> recv_buf(max_row_len, 0);
+
+          const int send_to   = (mpi_rank + 1) % mpi_size;
+          const int recv_from = (mpi_rank - 1 + mpi_size) % mpi_size;
+          MPI_Sendrecv(send_buf.data(), static_cast<int>(max_row_len), SBD_MPI_SIZE_T,
+                       send_to,   98,
+                       recv_buf.data(), static_cast<int>(max_row_len), SBD_MPI_SIZE_T,
+                       recv_from, 98, comm, MPI_STATUS_IGNORE);
+
+          // Rank 0's recv_buf is rank (mpi_size-1)'s last element — wrap-around,
+          // not a continuity constraint.  Only check ranks 1..mpi_size-1.
+          bool local_ok = true;
+          if (mpi_rank > 0 && !config.empty()) {
+            const auto& my_first = config[0];
+            bool is_dup = (std::memcmp(my_first.data(), recv_buf.data(),
+                                       max_row_len * sizeof(size_t)) == 0);
+            bool out_of_order = less_from_back(my_first, recv_buf);
+            local_ok = !is_dup && !out_of_order;
+          }
+
+          int local_ok_i = static_cast<int>(local_ok);
+          int all_ok = 0;
+          MPI_Allreduce(&local_ok_i, &all_ok, 1, MPI_INT, MPI_LAND, comm);
+
+          if (!all_ok) {
+            if (mpi_rank == 0) {
+              fprintf(stderr,
+                "sbd: ERROR: basis shards are not globally sorted or contain\n"
+                "  cross-shard duplicate records.  Each shard must cover a\n"
+                "  non-overlapping sorted range (as produced by gdet).\n"
+                "  Fix: regenerate shards with:\n"
+                "    python3 sbd/apps/caop_selected_basis_diagonalization/gen_bits.py"
+                " --sorted-split ...\n"
+                "  or run gdet on the alpha-det file.\n");
+              fflush(stderr);
+            }
+            MPI_Abort(comm, 1);
+          }
+        }
+      }
+
     } else {
       // Fallback for other Container types (e.g. std::vector<std::vector<size_t>>):
       // original sequential load + sort_bitarray.
