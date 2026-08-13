@@ -200,7 +200,7 @@ Generates 100 random bitstrings of length 16 with exactly 4 ones, sent to stdout
 | `--unique` | flag | (Round-robin mode only) emit only unique bitstrings. |
 | `--sorted-split` | flag | Force sorted-split mode even for single-file or stdout output. |
 | `--round-robin` | flag | Force round-robin mode even when multiple `-o` files are given. Produces overlapping ranges that `diag` will reject at startup. Useful only for testing. |
-| `--workers N` | `int` | Number of parallel worker processes for sorted-split mode (default: `min(cpu_count, 64)`). On DeltaAI GH200 nodes with `--cpus-per-task=72`, `cpu_count` is 72 so the cap applies — effective default is **64 workers**. |
+| `--workers N` | `int` | Number of parallel worker processes for sorted-split mode (default: `min(cpu_count, 64)`). On DeltaAI GH200 nodes, `mp.cpu_count()` returns 288 (4 chips × 72 threads per node, visible regardless of `--cpus-per-task`), so the cap of 64 applies — effective default is **64 workers**. |
 
 ### `--sorted-split` mode
 
