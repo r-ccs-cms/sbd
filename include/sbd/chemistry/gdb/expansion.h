@@ -702,10 +702,11 @@ namespace sbd {
       get_mpi_range(mpi_size_x,mpi_rank_x,i_begin,i_end);
 
       sbd::det_vector<size_t> xdet(det.begin() + i_begin, det.begin() + i_end);
+      std::vector<ElemT> xw(w.begin() + i_begin, w.begin() + i_end);
       edet.clear();
 
       if( type == 0 ) {
-	local_heatbath_expansion(xdet,w,bit_length,norb,I0,I1,I2,cutoff,max_batch_size,edet);
+	local_heatbath_expansion(xdet,xw,bit_length,norb,I0,I1,I2,cutoff,max_batch_size,edet);
       } else if( type == 1 ) {
 	sbd::det_vector<size_t, sbd::det_kind::half> adet;
 	sbd::det_vector<size_t, sbd::det_kind::half> bdet;
@@ -713,7 +714,7 @@ namespace sbd {
 	std::vector<size_t> bdet_count;
 	getHalfDets(xdet,bit_length,norb,
 		    adet,bdet,adet_count,bdet_count);
-	local_heatbath_expansion_lookup(xdet,adet,bdet,adet_count,bdet_count,w,
+	local_heatbath_expansion_lookup(xdet,adet,bdet,adet_count,bdet_count,xw,
 					bit_length,norb,I0,I1,I2,cutoff,max_batch_size,edet);
       }
       
