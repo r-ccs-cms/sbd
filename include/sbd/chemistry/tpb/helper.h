@@ -210,7 +210,18 @@ void GenerateExcitation(const std::vector<std::vector<size_t>> &adets,
 
     // task types 2 and 0 compute single alpha excitations
     if (helper.taskType != 1) {
-    #pragma omp parallel for
+    #pragma omp parallel
+    {
+      // cr/an hoisted out of the ia-loop: previously reconstructed on the heap every
+      // iteration (std::vector<int> cr(2); an(2);), which under -gpu=mem:unified routes
+      // every allocation through NVHPC's managed-memory pool allocator. With tens of
+      // thousands of ia iterations x many OMP threads, contention on the pool's
+      // allocator lock (nvompAcquireLock/get_freeblock in memmanagepool_mt.c) livelocks.
+      // One allocation per thread here, reused via OrbitalDifference's own
+      // cr.clear()/an.clear(), removes the contention entirely.
+      std::vector<int> cr; cr.reserve(2);
+      std::vector<int> an; an.reserve(2);
+    #pragma omp for
       for(size_t ia=braAlphaStart; ia < braAlphaEnd; ia++) {
         size_t scount = 0;
         for(size_t ja=ketAlphaStart; ja < ketAlphaEnd; ja++) {
@@ -218,8 +229,6 @@ void GenerateExcitation(const std::vector<std::vector<size_t>> &adets,
           if ( d == 2 ) scount++;
         }
 
-        std::vector<int> cr(2);
-        std::vector<int> an(2);
         helper.SinglesFromAlpha[ia-braAlphaStart].reserve(scount);
         helper.SinglesAlphaCrAn[ia-braAlphaStart].reserve(2*scount);
 
@@ -234,10 +243,15 @@ void GenerateExcitation(const std::vector<std::vector<size_t>> &adets,
         }
       }
     }
+    }
 
     // task type 2 computes double alpha excitations
     if (helper.taskType == 2) {
-    #pragma omp parallel for
+    #pragma omp parallel
+    {
+      std::vector<int> cr; cr.reserve(2);
+      std::vector<int> an; an.reserve(2);
+    #pragma omp for
       for(size_t ia=braAlphaStart; ia < braAlphaEnd; ia++) {
         size_t dcount = 0;
         for(size_t ja=ketAlphaStart; ja < ketAlphaEnd; ja++) {
@@ -245,8 +259,6 @@ void GenerateExcitation(const std::vector<std::vector<size_t>> &adets,
           if ( d == 4 ) dcount++;
         }
 
-        std::vector<int> cr(2);
-        std::vector<int> an(2);
         helper.DoublesFromAlpha[ia-braAlphaStart].reserve(dcount);
         helper.DoublesAlphaCrAn[ia-braAlphaStart].reserve(4*dcount);
 
@@ -263,10 +275,15 @@ void GenerateExcitation(const std::vector<std::vector<size_t>> &adets,
         }
       }
     }
+    }
 
     // task types 1 and 0 compute single beta excitations
     if (helper.taskType != 2) {
-#pragma omp parallel for
+#pragma omp parallel
+    {
+      std::vector<int> cr; cr.reserve(2);
+      std::vector<int> an; an.reserve(2);
+#pragma omp for
       for(size_t ib=braBetaStart; ib < braBetaEnd; ib++) {
         size_t scount = 0;
         for(size_t jb=ketBetaStart; jb < ketBetaEnd; jb++) {
@@ -276,8 +293,6 @@ void GenerateExcitation(const std::vector<std::vector<size_t>> &adets,
 
         helper.SinglesFromBeta[ib-braBetaStart].reserve(scount);
         helper.SinglesBetaCrAn[ib-braBetaStart].reserve(2*scount);
-        std::vector<int> cr(2);
-        std::vector<int> an(2);
 
         for(size_t jb=ketBetaStart; jb < ketBetaEnd; jb++) {
           int d = difference(bdets[ib],bdets[jb],bit_length,norb);
@@ -290,10 +305,15 @@ void GenerateExcitation(const std::vector<std::vector<size_t>> &adets,
         }
       }
     }
+    }
 
     // task type 1 computes double beta excitations
     if (helper.taskType == 1) {
-#pragma omp parallel for
+#pragma omp parallel
+    {
+      std::vector<int> cr; cr.reserve(2);
+      std::vector<int> an; an.reserve(2);
+#pragma omp for
       for(size_t ib=braBetaStart; ib < braBetaEnd; ib++) {
         size_t dcount = 0;
         for(size_t jb=ketBetaStart; jb < ketBetaEnd; jb++) {
@@ -303,8 +323,6 @@ void GenerateExcitation(const std::vector<std::vector<size_t>> &adets,
 
         helper.DoublesFromBeta[ib-braBetaStart].reserve(dcount);
         helper.DoublesBetaCrAn[ib-braBetaStart].reserve(4*dcount);
-        std::vector<int> cr(2);
-        std::vector<int> an(2);
 
         for(size_t jb=ketBetaStart; jb < ketBetaEnd; jb++) {
           int d = difference(bdets[ib],bdets[jb],bit_length,norb);
@@ -318,6 +336,7 @@ void GenerateExcitation(const std::vector<std::vector<size_t>> &adets,
           }
         }
       }
+    }
     }
 
   }
