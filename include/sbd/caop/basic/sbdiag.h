@@ -432,7 +432,8 @@ namespace sbd {
 	  load_basis_from_files(basisfiles,basis,
 				bit_length,system_size,
 				b_comm);
-	  sort_bitarray(basis);
+	  // sort_bitarray(basis) removed: load_basis_from_files guarantees sorted
+	  // output, and mpi_redistribution sorts its own received data internally.
 	  if( sbd_data.do_sort_basis ) {
 	    redistribution(basis,bit_length,system_size,b_comm);
 	    reordering(basis,bit_length,system_size,b_comm);
