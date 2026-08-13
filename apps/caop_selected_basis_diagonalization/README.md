@@ -157,16 +157,16 @@ selected-basis diagonalization.
 
 Two output modes are available:
 
-| Mode | Flag | Use case |
-|------|------|----------|
-| **round-robin** (legacy) | *(default)* | Single-file output or testing; files cover overlapping value ranges |
-| **sorted-split** | `--sorted-split` | Multi-rank `diag` runs; produces non-overlapping sorted-range files matching `gdet` output |
+| Mode | When it applies | Use case |
+|------|-----------------|----------|
+| **sorted-split** | **default** when multiple `-o` files are given | Multi-rank `diag` runs; non-overlapping sorted-range files matching `gdet` output |
+| **round-robin** | default for zero or one `-o` file; `--round-robin` to force | Single-file output or testing; files cover overlapping value ranges |
 
-> **Important for multi-rank runs**: the `diag` executable checks at startup that
-> basis shard files form globally sorted, non-overlapping ranges (one
+> **Why sorted-split is the multi-file default**: the `diag` executable checks at
+> startup that basis shard files form globally sorted, non-overlapping ranges (one
 > `MPI_Sendrecv` at the rank boundary).  Round-robin files fail this check and
-> cause an immediate abort with an actionable error message.  Always use
-> `--sorted-split` when generating shards for multi-rank diagonalization.
+> cause an immediate abort.  Generating multiple output files with round-robin
+> (`--round-robin`) produces shards that diag will refuse to load.
 
 ### Basic Usage
 
@@ -198,8 +198,9 @@ Generates 100 random bitstrings of length 16 with exactly 4 ones, sent to stdout
 |--------|------|-------------|
 | `-o / --outfile FILE [FILE ...]` | `str` | Output file(s). Without `--sorted-split`, files are filled in round-robin order. |
 | `--unique` | flag | (Round-robin mode only) emit only unique bitstrings. |
-| `--sorted-split` | flag | Write output files as non-overlapping sorted-range slices. Implies uniqueness. See below. |
-| `--workers N` | `int` | Number of parallel worker processes for `--sorted-split` (default: `min(cpu_count, 64)`). On DeltaAI GH200 nodes with `--cpus-per-task=72`, `cpu_count` is 72 so the cap applies — effective default is **64 workers**. |
+| `--sorted-split` | flag | Force sorted-split mode even for single-file or stdout output. |
+| `--round-robin` | flag | Force round-robin mode even when multiple `-o` files are given. Produces overlapping ranges that `diag` will reject at startup. Useful only for testing. |
+| `--workers N` | `int` | Number of parallel worker processes for sorted-split mode (default: `min(cpu_count, 64)`). On DeltaAI GH200 nodes with `--cpus-per-task=72`, `cpu_count` is 72 so the cap applies — effective default is **64 workers**. |
 
 ### `--sorted-split` mode
 
@@ -234,14 +235,15 @@ When `--sorted-split` is given with `-o FILE [FILE ...]`:
   python gen_bits.py --bitlength 20 --numones 10 --num 500 --unique -o basis.txt
   ```
 
-- **Sorted-split into 4 shard files for a 4-rank diag run** (recommended):
+- **Split into 4 shard files for a 4-rank diag run** (sorted-split is automatic):
   ```
   python gen_bits.py --bitlength 48 --numones 24 --num 100000000 --seed 42 \
-      --sorted-split --workers 32 \
+      --workers 32 \
       -o basis-00.txt basis-01.txt basis-02.txt basis-03.txt
   ```
-  Each output file covers a non-overlapping sorted range; all four together
-  pass the `diag` global-sort check.
+  Multiple `-o` files → sorted-split by default.  Each file covers a
+  non-overlapping sorted range; all four together pass the `diag` global-sort
+  check.
 
 ### Implementation Notes
 

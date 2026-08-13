@@ -3,22 +3,22 @@
 
 Two output modes:
 
-round-robin (default, legacy):
-    Bitstrings are generated one at a time and written to output files in
-    round-robin order (bitstring i → file i % n_files).  Files cover
-    overlapping value ranges — suitable only for single-file output or when
-    cross-shard duplicates are acceptable.
-
-sorted-split (--sorted-split):
+sorted-split (default when multiple -o files are given):
     Generate all strings in parallel (one process per --workers N workers),
     sort and dedup each chunk in parallel, merge-sort all chunks into a single
     sorted stream, then range-split into output files so each file holds a
     contiguous non-overlapping sorted range — matching gdet's output format.
-    Required when running with the diag global-sort validation check.
+    The diag executable enforces this layout at startup via a global-sort
+    check; round-robin files will cause an immediate abort.
 
-Usage:
+round-robin (--round-robin, or default when zero/one -o files are given):
+    Bitstrings are generated one at a time and written to output files in
+    round-robin order (bitstring i → file i % n_files).  Files cover
+    overlapping value ranges — only useful for single-file output or testing.
+
+Usage (4-shard diag run — sorted-split is automatic with multiple -o files):
     python3 gen_bits.py --bitlength 48 --numones 24 --num 100000000 --seed 42 \\
-        --sorted-split --workers 32 \\
+        --workers 32 \\
         -o basis48-25M-00.txt basis48-25M-01.txt basis48-25M-02.txt basis48-25M-03.txt
 """
 
@@ -250,16 +250,20 @@ def parse_args():
                         help="(Round-robin mode only) output only unique bitstrings.")
     parser.add_argument("--sorted-split", action="store_true",
                         help=(
-                            "Write output files as non-overlapping sorted-range slices "
-                            "(matches gdet output format).  Uses parallel workers.  "
-                            "Overrides --unique (implies uniqueness via dedup)."
+                            "Force sorted-split mode even for single-file or stdout output."
+                        ))
+    parser.add_argument("--round-robin", action="store_true",
+                        help=(
+                            "Force round-robin mode even when multiple -o files are given.  "
+                            "Produces overlapping ranges; diag will reject these files at "
+                            "startup.  Useful only for testing or single-file output."
                         ))
     parser.add_argument("--workers", type=int, default=None,
-                        help="Number of parallel workers for --sorted-split "
+                        help="Number of parallel workers for sorted-split mode "
                              "(default: min(cpu_count, 64)).")
     parser.add_argument("-o", "--outfile", nargs="+",
-                        help="Output file(s).  Multiple files: round-robin (default) "
-                             "or sorted-range (--sorted-split).")
+                        help="Output file(s).  Multiple files: sorted-split by default "
+                             "(use --round-robin to override).")
     return parser.parse_args()
 
 
@@ -277,9 +281,21 @@ def main():
         print("Error: --num must be positive.", file=sys.stderr)
         sys.exit(1)
 
+    if args.sorted_split and args.round_robin:
+        print("Error: --sorted-split and --round-robin are mutually exclusive.",
+              file=sys.stderr)
+        sys.exit(1)
+
     rng = random.Random(args.seed)
 
-    if args.sorted_split:
+    # Default: sorted-split when multiple output files are given (required by
+    # diag's global-sort check); round-robin otherwise.
+    use_sorted_split = (
+        args.sorted_split
+        or (not args.round_robin and len(args.outfile or []) > 1)
+    )
+
+    if use_sorted_split:
         write_sorted_split_parallel(
             args.bitlength, args.numones, args.num,
             args.seed, args.outfile or [],
