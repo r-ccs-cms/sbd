@@ -530,7 +530,19 @@ namespace sbd {
       MPI_Barrier(comm);
     } // end for(int recv_rank=0; recv_rank < mpi_size; recv_rank++)
 
-    sort_bitarray(new_config);
+    // Skip sort_bitarray if new_config is already sorted.  When the source
+    // data was globally ordered before redistribution (e.g. sorted-split
+    // shard files with a rank-count mismatch), mpi_redistribution ships
+    // contiguous slices in rank order, so new_config arrives sorted and the
+    // O((n/r) log(n/r)) sort is pure waste.  The O(n/r) check below costs
+    // nothing relative to the sort it avoids.
+    {
+      bool needs_sort = false;
+      const size_t nc = new_config.size();
+      for (size_t i = 1; i < nc && !needs_sort; ++i)
+        if (less_from_back(new_config[i], new_config[i-1])) needs_sort = true;
+      if (needs_sort) sort_bitarray(new_config);
+    }
     config = std::move(new_config);
 
     std::fill(send_config_size.begin(),send_config_size.end(),static_cast<size_t>(0));
