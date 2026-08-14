@@ -1286,11 +1286,12 @@ namespace sbd {
     sort_bitarray(dets);
   }
 
+  template<typename DetT>
   inline int destination_by_splitters(
-    const std::vector<size_t> &det,
+    const DetT &det,
     const std::vector<std::vector<size_t>> &splitters) {
     auto it = std::upper_bound(splitters.begin(), splitters.end(), det,
-			       [](const std::vector<size_t>& a, const std::vector<size_t>& b) {
+			       [](const auto& a, const auto& b) {
 				 return less_from_back(a, b); });
     return static_cast<int>(it - splitters.begin());
   }

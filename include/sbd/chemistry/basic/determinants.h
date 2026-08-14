@@ -191,7 +191,8 @@ namespace sbd {
     return count;
   }
 
-  int getClosed(const std::vector<size_t> & det,
+  template<typename DetT>
+  int getClosed(const DetT & det,
 		const size_t bit_length,
 		const size_t L,
 		std::vector<int> & closed) {
@@ -230,7 +231,8 @@ namespace sbd {
     return cindex;
   }
 
-  void parity(const std::vector<size_t> & dets,
+  template<typename DetT>
+  void parity(const DetT & dets,
 	      const size_t bit_length,
 	      const int & start, const int & end, double& sgn) {
     if (start > end) {
@@ -438,8 +440,8 @@ namespace sbd {
     }
   }
 
-  template <typename ElemT>
-  ElemT ZeroExcite(const std::vector<size_t> & det,
+  template <typename ElemT, typename DetT>
+  ElemT ZeroExcite(const DetT & det,
 		   const size_t bit_length,
 		   const size_t L,
 		   const ElemT & I0,
@@ -463,8 +465,8 @@ namespace sbd {
         return energy + I0;
   }
 
-  template <typename ElemT>
-  ElemT OneExcite(const std::vector<size_t> & det,
+  template <typename ElemT, typename DetT>
+  ElemT OneExcite(const DetT & det,
 		  const size_t bit_length,
 		  int & i,
 		  int & a,
@@ -487,8 +489,8 @@ namespace sbd {
         return energy;
   }
 
-  template <typename ElemT>
-  ElemT TwoExcite(const std::vector<size_t> & det,
+  template <typename ElemT, typename DetT>
+  ElemT TwoExcite(const DetT & det,
 		  const size_t bit_length,
 		  int & i,
 		  int & j,

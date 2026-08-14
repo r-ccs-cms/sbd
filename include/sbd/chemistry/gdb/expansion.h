@@ -324,7 +324,7 @@ namespace sbd {
 	  }
 	};
 
-	std::vector<size_t> cdet = det[0];
+	std::vector<size_t> cdet(det[0].begin(), det[0].end());
 
 	if(pair_begin < pair_end) {
 	  size_t ia = static_cast<size_t>(
@@ -519,7 +519,7 @@ namespace sbd {
 	  }
 	};
 
-	std::vector<size_t> cdet = det[0];
+	std::vector<size_t> cdet(det[0].begin(), det[0].end());
 
 	if(pair_begin < pair_end) {
 	  size_t ia = static_cast<size_t>(
@@ -572,7 +572,7 @@ namespace sbd {
 				    I1,I2);
 	      RealT hijc = std::abs( hij * w[idet] );
 	      if( hijc > cutoff ) {
-		cdet = det[idet];
+		assign_det(cdet, det[idet]);
 		setocc(cdet,bit_length,aorb_single[2*ja+1],true);
 		setocc(cdet,bit_length,aorb_single[2*ja+0],false);
 		push_candidate(cdet);
@@ -589,7 +589,7 @@ namespace sbd {
 				    I1,I2);
 	      RealT hijc = std::abs( hij * w[idet] );
 	      if( hijc > cutoff ) {
-		cdet = det[idet];
+		assign_det(cdet, det[idet]);
 		setocc(cdet,bit_length,aorb_double[4*ja+3],true);
 		setocc(cdet,bit_length,aorb_double[4*ja+1],false);
 		setocc(cdet,bit_length,aorb_double[4*ja+2],true);
@@ -609,7 +609,7 @@ namespace sbd {
 				      I1,I2);
 		RealT hijc = std::abs( hij * w[idet] );
 		if( hijc > cutoff ) {
-		  cdet = det[idet];
+		  assign_det(cdet, det[idet]);
 		  setocc(cdet,bit_length,aorb_single[2*ja+1],true);
 		  setocc(cdet,bit_length,aorb_single[2*ja+0],false);
 		  setocc(cdet,bit_length,borb_single[2*jb+1],true);
@@ -627,7 +627,7 @@ namespace sbd {
 				    I1,I2);
 	      RealT hijc = std::abs( hij * w[idet] );
 	      if( hijc > cutoff ) {
-		cdet = det[idet];
+		assign_det(cdet, det[idet]);
 		setocc(cdet,bit_length,borb_single[2*jb+1],true);
 		setocc(cdet,bit_length,borb_single[2*jb+0],false);
 		push_candidate(cdet);
@@ -644,7 +644,7 @@ namespace sbd {
 				    I1,I2);
 	      RealT hijc = std::abs( hij * w[idet] );
 	      if( hijc > cutoff ) {
-		cdet = det[idet];
+		assign_det(cdet, det[idet]);
 		setocc(cdet,bit_length,borb_double[4*jb+3],true);
 		setocc(cdet,bit_length,borb_double[4*jb+1],false);
 		setocc(cdet,bit_length,borb_double[4*jb+2],true);
