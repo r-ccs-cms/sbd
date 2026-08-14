@@ -68,7 +68,6 @@ namespace sbd {
       {
 	size_t ib_start = 0;
 	size_t ib_end   = bs.size();
-	std::vector<size_t> vb;
 	std::vector<size_t> vk;
 	int sign_count;
 	size_t size_t_one = static_cast<size_t>(1);
@@ -76,7 +75,7 @@ namespace sbd {
 #pragma omp for schedule(dynamic)
 	for(size_t ib = ib_start; ib < ib_end; ib++) {
 
-	  vb = bs[ib];
+	  const auto& vb = bs[ib];
 	  for(size_t n=0; n < H.o_.size(); n++) {
 	    // fast reject: required bits absent or forbidden bits present
 	    {
@@ -90,7 +89,7 @@ namespace sbd {
 	    }
 	    // survivor: construct ket and accumulate sign
 	    sign_count = 1;
-	    vk = vb;
+	    assign_det(vk, vb);
 	    for(int k=0; k < H.o_[n].n_dag_; k++) {
 	      int q = H.o_[n].fops_[k].q_;
 	      int r = q / bit_length;

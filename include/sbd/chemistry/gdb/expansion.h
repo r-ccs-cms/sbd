@@ -74,7 +74,8 @@ namespace sbd {
 
   namespace gdb {
 
-    void singles_from_hdet(const std::vector<size_t> & hdet,
+    template<typename HDetT>
+    void singles_from_hdet(const HDetT& hdet,
 			  size_t bit_length,
 			  size_t norb,
 			  size_t num_one,
@@ -86,7 +87,7 @@ namespace sbd {
       size_t num_ex = num_one * (norb - num_one);
       edet.resize(num_ex);
       cran.resize(2*num_ex);
-      std::vector<size_t> base = hdet;
+      std::vector<size_t> base(hdet.begin(), hdet.end());
       size_t ex_count = 0;
       for(size_t i=0; i < num_one; i++) {
 	setocc(base,bit_length,closed[i],false);
@@ -101,7 +102,8 @@ namespace sbd {
       }
     }
 
-    void doubles_from_hdet(const std::vector<size_t> & hdet,
+    template<typename HDetT>
+    void doubles_from_hdet(const HDetT& hdet,
 			  size_t bit_length,
 			  size_t norb,
 			  size_t num_one,
@@ -113,7 +115,7 @@ namespace sbd {
       size_t num_ex = num_one * (num_one-1) * (norb - num_one) * (norb - num_one - 1) / 4;
       edet.resize(num_ex);
       cran.resize(4*num_ex);
-      std::vector<size_t> base = hdet;
+      std::vector<size_t> base(hdet.begin(), hdet.end());
       size_t ex_count = 0;
       for(size_t i=0; i < num_one; i++) {
 	setocc(base,bit_length,closed[i],false);

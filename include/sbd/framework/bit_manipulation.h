@@ -189,7 +189,8 @@ namespace sbd {
      @param[in] bit_length: length of the bitstring managed by each size_t
      @param[in] L: number of total bits in the bitstring
    */
-  std::string makestring(const std::vector<size_t> & config,
+  template<typename DetT>
+  std::string makestring(const DetT& config,
 			 size_t bit_length,
 			 size_t L) {
     std::string s;

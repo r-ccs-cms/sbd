@@ -9,8 +9,8 @@ namespace sbd {
 
 #ifdef SBD_TRADMODE
 
-  std::vector<size_t> DetFromAlphaBeta(const std::vector<size_t> & A,
-                                       const std::vector<size_t> & B,
+  template<typename ARange, typename BRange>
+  std::vector<size_t> DetFromAlphaBeta(const ARange& A, const BRange& B,
                                        const size_t bit_length,
                                        const size_t L) {
     int dsize = (2*L + bit_length - 1) / bit_length;
@@ -52,11 +52,11 @@ namespace sbd {
     return D;
   }
 
-  void DetFromAlphaBeta(const std::vector<size_t> & A,
-                        const std::vector<size_t> & B,
+  template<typename ARange, typename BRange>
+  void DetFromAlphaBeta(const ARange& A, const BRange& B,
                         const size_t bit_length,
                         const size_t L,
-                        std::vector<size_t> & D) {
+                        std::vector<size_t>& D) {
     int fsize = L / bit_length;
     int half = bit_length / 2;
     int extra = L - fsize*bit_length;
@@ -94,8 +94,8 @@ namespace sbd {
   }
 
 #else
-  std::vector<size_t> DetFromAlphaBeta(const std::vector<size_t>& A,
-				       const std::vector<size_t>& B,
+  template<typename ARange, typename BRange>
+  std::vector<size_t> DetFromAlphaBeta(const ARange& A, const BRange& B,
 				       const size_t bit_length,
 				       const size_t L) {
     size_t D_size = (2*L+bit_length-1)/bit_length;
@@ -118,11 +118,11 @@ namespace sbd {
     return D;
   }
 
-  void DetFromAlphaBeta(const std::vector<size_t> & A,
-			const std::vector<size_t> & B,
+  template<typename ARange, typename BRange>
+  void DetFromAlphaBeta(const ARange& A, const BRange& B,
 			const size_t bit_length,
 			const size_t L,
-			std::vector<size_t> & D) {
+			std::vector<size_t>& D) {
     std::fill(D.begin(),D.end(),static_cast<size_t>(0));
     for(size_t i=0; i < L; ++i) {
       size_t block = i / bit_length;
@@ -174,7 +174,8 @@ namespace sbd {
     return (det[index] >> bit_pos) & 1;
   }
 
-  inline int bitcount(const std::vector<size_t> & det,
+  template<typename DetT>
+  inline int bitcount(const DetT& det,
 		      const size_t bit_length,
 		      const size_t L) {
     int count = 0;
@@ -206,11 +207,12 @@ namespace sbd {
     return cindex;
   }
 
-  int getOpenClosed(const std::vector<size_t> & det,
+  template<typename DetT>
+  int getOpenClosed(const DetT& det,
 		    const size_t bit_length,
 		    const size_t L,
-		    std::vector<int> & open,
-		    std::vector<int> & closed) {
+		    std::vector<int>& open,
+		    std::vector<int>& closed) {
     int cindex = 0;
     int oindex = 0;
     int csize = bitcount(det,bit_length,L);
@@ -328,10 +330,11 @@ namespace sbd {
     return beta;
   }
 
-  void getAdet(const std::vector<size_t> & det,
+  template<typename DetT>
+  void getAdet(const DetT& det,
 	       size_t bit_length,
 	       size_t norb,
-	       std::vector<size_t> & adet) {
+	       std::vector<size_t>& adet) {
     size_t adet_size = (norb + bit_length - 1 ) / bit_length;
     if( adet_size != adet.size() ) {
       adet.resize(adet_size);
@@ -345,10 +348,11 @@ namespace sbd {
     }
   }
 
-  void getBdet(const std::vector<size_t>& det,
+  template<typename DetT>
+  void getBdet(const DetT& det,
 	       size_t bit_length,
 	       size_t norb,
-	       std::vector<size_t> & bdet) {
+	       std::vector<size_t>& bdet) {
     size_t bdet_size = (norb + bit_length - 1 ) / bit_length;
     if( bdet_size != bdet.size() ) {
       bdet.resize(bdet_size);

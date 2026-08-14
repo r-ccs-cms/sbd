@@ -64,6 +64,15 @@ public:
                 throw std::length_error("det_vector::row: resize to wrong size");
         }
 
+        // Assigns from an iterator range [first, last); size must match the row width.
+        template<typename InputIt>
+        void assign(InputIt first, InputIt last) {
+            size_t n = static_cast<size_t>(std::distance(first, last));
+            if (n != size())
+                throw std::length_error("det_vector::row::assign: size mismatch");
+            std::copy(first, last, _data);
+        }
+
         ElemT& operator[](size_t k) noexcept       { return _data[k]; }
         const ElemT& operator[](size_t k) const noexcept { return _data[k]; }
 
@@ -75,13 +84,14 @@ public:
         const ElemT* begin() const noexcept { return _data; }
         const ElemT* end()   const noexcept { return _data + size(); }
 
-        operator std::vector<ElemT>() const {
+        explicit operator std::vector<ElemT>() const {
             return std::vector<ElemT>(_data, _data + size());
         }
 
-        // In-place copy from vector; sets _elem_size if not yet set, else must match.
+        // In-place copy from vector; size must match the row width.
         row& operator=(const std::vector<ElemT>& v) {
-            det_vector::_set_elem_size(v.size());
+            if (v.size() != size())
+                throw std::length_error("det_vector::row::operator=: size mismatch");
             std::memcpy(_data, v.data(), size() * sizeof(ElemT));
             return *this;
         }
@@ -578,6 +588,16 @@ private:
         std::memcpy(_data.data() + i * stride(), src, _elem_size * sizeof(ElemT));
     }
 };
+
+// ---- assignment utility ----
+
+// No-allocation range assign: copies src contents into dst, reusing dst's
+// existing allocation.  dst must support assign(InputIt, InputIt)
+// (std::vector and det_vector::row both do).  src needs only begin()/end().
+template<typename Dst, typename Src>
+void assign_det(Dst& dst, const Src& src) {
+    dst.assign(src.begin(), src.end());
+}
 
 // ---- sort / unique free functions ----
 //

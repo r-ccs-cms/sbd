@@ -19,12 +19,11 @@ namespace sbd {
     hii.resize(bs.size(),ElemT(0.0));
 #pragma omp parallel
     {
-      std::vector<size_t> v;
       size_t size_t_one = static_cast<size_t>(1);
       bool check;
 #pragma omp for
       for(size_t ib=0; ib < bs.size(); ib++) {
-	v = bs[ib];
+	const auto& v = bs[ib];
 	for(size_t n=0; n < H.d_.size(); n++) {
 	  check = false;
 	  for(int k=0; k < H.d_[n].n_dag_; k++) {
@@ -117,18 +116,17 @@ namespace sbd {
 	jh[task][thread_id].reserve(reserve_size);
 	hij[task][thread_id].reserve(reserve_size);
 
-	std::vector<size_t> vb;
 	std::vector<size_t> vk;
 	size_t size_t_one = static_cast<size_t>(1);
 	int sign_count;
 	bool check;
-	
+
 	for(size_t ib=ib_start; ib < ib_end; ib+=num_compute) {
 
-	  vb = bs[ib];
+	  const auto& vb = bs[ib];
 	  for(size_t n=0; n < H.o_.size(); n++) {
 	    sign_count = 1;
-	    vk = vb;
+	    assign_det(vk, vb);
 	    check = false;
 	    for(int k=0; k < H.o_[n].n_dag_; k++) {
 	      size_t q = static_cast<size_t>(H.o_[n].fops_[k].q_);

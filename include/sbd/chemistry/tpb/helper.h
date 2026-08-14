@@ -94,7 +94,7 @@ namespace sbd {
         int nclosed = getOpenClosed(ADets[ib],bit_length,norb,open,closed);
         for(size_t j=0; j < nclosed; j++) {
   	  for(size_t k=0; k < norb-nclosed; k++) {
-  	    aDet = ADets[ib];
+	    assign_det(aDet, ADets[ib]);
 	    setocc(aDet,bit_length,closed[j],false);
 	    setocc(aDet,bit_length,open[k],true);
 	    auto itk = std::find(ADets.begin()+ketAlphaStart,
@@ -120,7 +120,7 @@ namespace sbd {
         int nclosed = getOpenClosed(BDets[ib],bit_length,norb,open,closed);
         for(size_t j=0; j < nclosed; j++) {
 	  for(size_t k=0; k < norb-nclosed; k++) {
-	    bDet = BDets[ib];
+	    assign_det(bDet, BDets[ib]);
 	    setocc(bDet,bit_length,closed[j],false);
 	    setocc(bDet,bit_length,open[k],true);
 	    auto itk = std::find(BDets.begin()+ketBetaStart,
