@@ -9,8 +9,8 @@ namespace sbd {
 
 #ifdef SBD_TRADMODE
 
-  template<typename ARange, typename BRange>
-  std::vector<size_t> DetFromAlphaBeta(const ARange& A, const BRange& B,
+  template<typename ADetT, typename BDetT>
+  std::vector<size_t> DetFromAlphaBeta(const ADetT& A, const BDetT& B,
                                        const size_t bit_length,
                                        const size_t L) {
     int dsize = (2*L + bit_length - 1) / bit_length;
@@ -52,11 +52,11 @@ namespace sbd {
     return D;
   }
 
-  template<typename ARange, typename BRange>
-  void DetFromAlphaBeta(const ARange& A, const BRange& B,
+  template<typename ADetT, typename BDetT, typename DetT>
+  void DetFromAlphaBeta(const ADetT& A, const BDetT& B,
                         const size_t bit_length,
                         const size_t L,
-                        std::vector<size_t>& D) {
+                        DetT& D) {
     int fsize = L / bit_length;
     int half = bit_length / 2;
     int extra = L - fsize*bit_length;
@@ -94,8 +94,8 @@ namespace sbd {
   }
 
 #else
-  template<typename ARange, typename BRange>
-  std::vector<size_t> DetFromAlphaBeta(const ARange& A, const BRange& B,
+  template<typename ADetT, typename BDetT>
+  std::vector<size_t> DetFromAlphaBeta(const ADetT& A, const BDetT& B,
 				       const size_t bit_length,
 				       const size_t L) {
     size_t D_size = (2*L+bit_length-1)/bit_length;
@@ -118,11 +118,11 @@ namespace sbd {
     return D;
   }
 
-  template<typename ARange, typename BRange>
-  void DetFromAlphaBeta(const ARange& A, const BRange& B,
+  template<typename ADetT, typename BDetT, typename DetT>
+  void DetFromAlphaBeta(const ADetT& A, const BDetT& B,
 			const size_t bit_length,
 			const size_t L,
-			std::vector<size_t>& D) {
+			DetT& D) {
     std::fill(D.begin(),D.end(),static_cast<size_t>(0));
     for(size_t i=0; i < L; ++i) {
       size_t block = i / bit_length;
