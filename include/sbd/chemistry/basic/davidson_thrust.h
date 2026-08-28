@@ -65,9 +65,12 @@ void GetTotalD_Thrust(const thrust::device_vector<ElemT> & hii,
                    size_d * sizeof(ElemT), cudaMemcpyDeviceToDevice);
     } else {
         MPI_Datatype DataT = GetMpiType<ElemT>::MpiT;
-        MPI_Allreduce((ElemT*)thrust::raw_pointer_cast(hii.data()),
-                      (ElemT*)thrust::raw_pointer_cast(dii.data()),
-                      size_d, DataT, MPI_SUM, h_comm);
+        {
+            SBD_NVTX_RANGE_COLOR("MPI_Allreduce", 0);
+            MPI_Allreduce((ElemT*)thrust::raw_pointer_cast(hii.data()),
+                          (ElemT*)thrust::raw_pointer_cast(dii.data()),
+                          size_d, DataT, MPI_SUM, h_comm);
+        }
     }
 }
 
