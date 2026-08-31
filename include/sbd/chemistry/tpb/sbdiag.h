@@ -346,8 +346,6 @@ namespace sbd {
 	*/
 
 	auto time_start_diag = std::chrono::high_resolution_clock::now();
-	auto time_start_davidson = std::chrono::high_resolution_clock::now();
-	auto time_start_qcham = std::chrono::high_resolution_clock::now();
 #ifdef SBD_THRUST
 	auto time_start_mult_init = std::chrono::high_resolution_clock::now();
         {
@@ -367,12 +365,14 @@ namespace sbd {
 		std::cout << " Elapsed time for mult.Init() " << elapsed_mult_init << " (sec) " << std::endl;
 	}
 
+	auto time_start_qcham = std::chrono::high_resolution_clock::now();
 	thrust::device_vector<double> hii;
         {
             SBD_NVTX_RANGE_COLOR("device_mult.makeQChamDiagTerms", __LINE__);
             device_mult.makeQChamDiagTerms(hii);
         }
 #else
+	auto time_start_qcham = std::chrono::high_resolution_clock::now();
 	std::vector<double> hii;
 	sbd::makeQChamDiagTerms(adet,bdet,bit_length,L,
 				helper,I0,I1,I2,hii,
@@ -385,6 +385,7 @@ namespace sbd {
 		std::cout << " Elapsed time for makeQChamDiagTerms " << elapsed_qcham << " (sec) " << std::endl;
 	}
 
+	auto time_start_davidson = std::chrono::high_resolution_clock::now();
 #ifdef SBD_THRUST
 	if( method == 0 ) {
             SBD_NVTX_RANGE_COLOR("Davidson", __LINE__);
