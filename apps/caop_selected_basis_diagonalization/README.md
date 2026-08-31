@@ -150,64 +150,107 @@ python gen_ham.py \
 
 ---
 ## `gen_bits.py`: Bitstring Generator (U(1)-Symmetric)
-This script is a simple and flexible tool for generating bitstrings with fixed Hamming weight, corresponding to a **U(1)-symmetric sector** (fixed particle number).
-It is desgined for preparing test data for selected-basis diagonalization, CI/FCI sampling, and various quantum many-body simulations.
 
-The generator currently supports:
-- Random bitstring generation with fixed number of 1s
-- Optional uniqueness filtering
-- Output to one or multiple files
-- Even (round-robin) distribution of bitstrings across multiple output files
-- Random seed control for reproducibility
-Additional generation methods can be added via the `--method` option.
+This script generates bitstrings with fixed Hamming weight, corresponding to a
+**U(1)-symmetric sector** (fixed particle number), for use as basis states in
+selected-basis diagonalization.
+
+Two output modes are available:
+
+| Mode | When it applies | Use case |
+|------|-----------------|----------|
+| **sorted-split** | **default** when multiple `-o` files are given | Multi-rank `diag` runs; non-overlapping sorted-range files matching `gdet` output |
+| **round-robin** | default for zero or one `-o` file; `--round-robin` to force | Single-file output or testing; files cover overlapping value ranges |
+
+> **Why sorted-split is the multi-file default**: the `diag` executable checks at
+> startup that basis shard files form globally sorted, non-overlapping ranges (one
+> `MPI_Sendrecv` at the rank boundary).  Round-robin files fail this check and
+> cause an immediate abort.  Generating multiple output files with round-robin
+> (`--round-robin`) produces shards that diag will refuse to load.
 
 ### Basic Usage
+
 ```
 python gen_bits.py --bitlength 16 --numones 4 --num 100
 ```
-This generates:
-- Bitstrings of length 16
-- With exactly 4 bits set to 1
-- A total of 100 samples
-- Output sent to stdout
+Generates 100 random bitstrings of length 16 with exactly 4 ones, sent to stdout.
 
-### command-Line Options
-This section describes all available options.
-#### Required Options
-| Option | Argument | Description |
-|--------|----------|-------------|
+### Command-Line Options
+
+#### Required
+
+| Option | Type | Description |
+|--------|------|-------------|
 | `--bitlength L` | `int` | Length of each bitstring (system size). |
-| `--numones N` | `int` | Number of bits set to 1 (particle number in the U(1) sector). |
+| `--numones N` | `int` | Number of bits set to 1 (particle number). |
 
-#### Primary Options
-| Option | Argument | Description |
-|--------|----------|-------------|
+#### Generation control
+
+| Option | Type | Description |
+|--------|------|-------------|
 | `--num M` | `int` | Number of bitstrings to generate (default: 10). |
-| `--method m` | `int` | `0`: Random generation with fixed Hamming weight. |
-| `--unique` | -- | If specified, only unique bitstrings are output. |
-| `--seed R` | `int` | Set random seed to make the output reproducible. |
-| `--outfile files1 [files2 ...]` | `str` | Specify one or more output files. |
+| `--method m` | `int` | `0`: random shuffle of fixed-Hamming-weight base pattern (only method currently supported). |
+| `--seed R` | `int` | Random seed for reproducibility. |
+
+#### Output control
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `-o / --outfile FILE [FILE ...]` | `str` | Output file(s). Without `--sorted-split`, files are filled in round-robin order. |
+| `--unique` | flag | (Round-robin mode only) emit only unique bitstrings. |
+| `--sorted-split` | flag | Force sorted-split mode even for single-file or stdout output. |
+| `--round-robin` | flag | Force round-robin mode even when multiple `-o` files are given. Produces overlapping ranges that `diag` will reject at startup. Useful only for testing. |
+| `--workers N` | `int` | Number of parallel worker processes for sorted-split mode (default: `min(cpu_count, 64)`). On DeltaAI GH200 nodes, `mp.cpu_count()` returns 288 (4 chips × 72 threads per node, visible regardless of `--cpus-per-task`), so the cap of 64 applies — effective default is **64 workers**. |
+
+### `--sorted-split` mode
+
+When `--sorted-split` is given with `-o FILE [FILE ...]`:
+
+1. **N parallel workers** each generate `--num / N` strings, sort and dedup
+   in-process, and write a pre-sorted chunk to a temporary file.
+2. `sort --merge --unique` merges all chunks in linear time (inputs are
+   pre-sorted).
+3. Unique line count is computed; `get_mpi_range`-style boundaries are derived
+   (identical to the formula `diag` uses for target-count computation).
+4. The sorted stream is split into the requested output files so each file holds
+   a contiguous, non-overlapping sorted range — matching the output of `gdet`.
+
+**Performance** (48-site, 100 M strings, 32 workers on a single GH200 node):
+~4.5 min wall time vs ~25–30 min for single-process generation.
 
 ### Usage Examples
-- **Generate 100 bitstrings to stdout**. 
+
+- **Generate 100 bitstrings to stdout**:
   ```
   python gen_bits.py --bitlength 12 --numones 6 --num 100
   ```
-- **Reproducible random generation**. 
+
+- **Reproducible random generation**:
   ```
   python gen_bits.py --bitlength 20 --numones 8 --num 50 --seed 123
   ```
-- **Unique bitstrings only**.  
+
+- **Unique bitstrings only (round-robin, single file)**:
   ```
-  python gen_bits.py --bitlength 20 --numones 10 --num 500 --unique
+  python gen_bits.py --bitlength 20 --numones 10 --num 500 --unique -o basis.txt
   ```
-- **Split output across 2 files**. 
+
+- **Split into 4 shard files for a 4-rank diag run** (sorted-split is automatic):
   ```
-  python gen_bits.py --bitlength 18 --numones 9 --num 200 \
-          --outfile part1,txt part2.txt
+  python gen_bits.py --bitlength 48 --numones 24 --num 100000000 --seed 42 \
+      --workers 32 \
+      -o basis-00.txt basis-01.txt basis-02.txt basis-03.txt
   ```
+  Multiple `-o` files → sorted-split by default.  Each file covers a
+  non-overlapping sorted range; all four together pass the `diag` global-sort
+  check.
+
 ### Implementation Notes
-- Random samples are generated by shuffling a base bit pattern with fixed Hamming weight.
-- The `--unique` option operates by collecting results in a Python `set`.
-- Output distribution uses a simple round-robin assignment, suitable for HPC batch jobs.
-- The code structure is modular and ready for adding new generation methods.
+
+- Random samples are generated by shuffling a base bit pattern `[1]*numones +
+  [0]*(bitlength-numones)` with a seeded RNG — Hamming weight is preserved
+  exactly.
+- In `--sorted-split` mode, per-worker seeds are derived deterministically from
+  `--seed`, so output is reproducible given fixed `--num` and `--workers`.
+- The `sort --merge` step requires the GNU coreutils `sort` with `--merge`
+  support (standard on Linux).

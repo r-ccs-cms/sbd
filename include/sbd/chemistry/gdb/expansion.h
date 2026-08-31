@@ -74,7 +74,8 @@ namespace sbd {
 
   namespace gdb {
 
-    void singles_from_hdet(const std::vector<size_t> & hdet,
+    template<typename HDetT>
+    void singles_from_hdet(const HDetT& hdet,
 			  size_t bit_length,
 			  size_t norb,
 			  size_t num_one,
@@ -86,7 +87,7 @@ namespace sbd {
       size_t num_ex = num_one * (norb - num_one);
       edet.resize(num_ex);
       cran.resize(2*num_ex);
-      std::vector<size_t> base = hdet;
+      std::vector<size_t> base(hdet.begin(), hdet.end());
       size_t ex_count = 0;
       for(size_t i=0; i < num_one; i++) {
 	setocc(base,bit_length,closed[i],false);
@@ -101,7 +102,8 @@ namespace sbd {
       }
     }
 
-    void doubles_from_hdet(const std::vector<size_t> & hdet,
+    template<typename HDetT>
+    void doubles_from_hdet(const HDetT& hdet,
 			  size_t bit_length,
 			  size_t norb,
 			  size_t num_one,
@@ -113,7 +115,7 @@ namespace sbd {
       size_t num_ex = num_one * (num_one-1) * (norb - num_one) * (norb - num_one - 1) / 4;
       edet.resize(num_ex);
       cran.resize(4*num_ex);
-      std::vector<size_t> base = hdet;
+      std::vector<size_t> base(hdet.begin(), hdet.end());
       size_t ex_count = 0;
       for(size_t i=0; i < num_one; i++) {
 	setocc(base,bit_length,closed[i],false);
@@ -322,7 +324,7 @@ namespace sbd {
 	  }
 	};
 
-	std::vector<size_t> cdet = det[0];
+	std::vector<size_t> cdet(det[0].begin(), det[0].end());
 
 	if(pair_begin < pair_end) {
 	  size_t ia = static_cast<size_t>(
@@ -517,7 +519,7 @@ namespace sbd {
 	  }
 	};
 
-	std::vector<size_t> cdet = det[0];
+	std::vector<size_t> cdet(det[0].begin(), det[0].end());
 
 	if(pair_begin < pair_end) {
 	  size_t ia = static_cast<size_t>(
@@ -570,7 +572,7 @@ namespace sbd {
 				    I1,I2);
 	      RealT hijc = std::abs( hij * w[idet] );
 	      if( hijc > cutoff ) {
-		cdet = det[idet];
+		assign_det(cdet, det[idet]);
 		setocc(cdet,bit_length,aorb_single[2*ja+1],true);
 		setocc(cdet,bit_length,aorb_single[2*ja+0],false);
 		push_candidate(cdet);
@@ -587,7 +589,7 @@ namespace sbd {
 				    I1,I2);
 	      RealT hijc = std::abs( hij * w[idet] );
 	      if( hijc > cutoff ) {
-		cdet = det[idet];
+		assign_det(cdet, det[idet]);
 		setocc(cdet,bit_length,aorb_double[4*ja+3],true);
 		setocc(cdet,bit_length,aorb_double[4*ja+1],false);
 		setocc(cdet,bit_length,aorb_double[4*ja+2],true);
@@ -607,7 +609,7 @@ namespace sbd {
 				      I1,I2);
 		RealT hijc = std::abs( hij * w[idet] );
 		if( hijc > cutoff ) {
-		  cdet = det[idet];
+		  assign_det(cdet, det[idet]);
 		  setocc(cdet,bit_length,aorb_single[2*ja+1],true);
 		  setocc(cdet,bit_length,aorb_single[2*ja+0],false);
 		  setocc(cdet,bit_length,borb_single[2*jb+1],true);
@@ -625,7 +627,7 @@ namespace sbd {
 				    I1,I2);
 	      RealT hijc = std::abs( hij * w[idet] );
 	      if( hijc > cutoff ) {
-		cdet = det[idet];
+		assign_det(cdet, det[idet]);
 		setocc(cdet,bit_length,borb_single[2*jb+1],true);
 		setocc(cdet,bit_length,borb_single[2*jb+0],false);
 		push_candidate(cdet);
@@ -642,7 +644,7 @@ namespace sbd {
 				    I1,I2);
 	      RealT hijc = std::abs( hij * w[idet] );
 	      if( hijc > cutoff ) {
-		cdet = det[idet];
+		assign_det(cdet, det[idet]);
 		setocc(cdet,bit_length,borb_double[4*jb+3],true);
 		setocc(cdet,bit_length,borb_double[4*jb+1],false);
 		setocc(cdet,bit_length,borb_double[4*jb+2],true);

@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <sstream>
 #include <fstream>
+#include <omp.h>
 
 namespace sbd {
 
@@ -88,17 +89,23 @@ namespace sbd {
 	auto cmp = [](const auto & x, const auto & y) {
 	  return sbd::less_from_back(x,y);
 	};
-	std::vector<size_t> index_not_found;
-	index_not_found.reserve(load_basis_size);
-	for(size_t i=0; i < load_basis_size; i++) {
-	  auto itn = std::lower_bound(basis.begin(),basis.end(),load_basis[i],cmp);
-	  if( itn == basis.end() || *itn != load_basis[i] ) {
-	    index_not_found.push_back(i);
-	  } else {
-	    auto n = static_cast<size_t>(itn - basis.begin());
-	    w[n] = load_w[i];
+	// Parallel binary search: race-free because basis is sorted and unique, so
+	// each load_basis[i] maps to at most one slot.  Use std::vector<char>
+	// rather than std::vector<bool> to avoid the bit-packed specialisation's
+	// concurrent-write pitfall (two bools in the same byte, distinct indices).
+	std::vector<char> found_flag(load_basis_size, 0);
+	#pragma omp parallel for schedule(static)
+	for (size_t i = 0; i < load_basis_size; ++i) {
+	  auto it = std::lower_bound(basis.begin(), basis.end(), load_basis[i], cmp);
+	  if (it != basis.end() && *it == load_basis[i]) {
+	    w[static_cast<size_t>(it - basis.begin())] = load_w[i];
+	    found_flag[i] = 1;
 	  }
 	}
+	std::vector<size_t> index_not_found;
+	index_not_found.reserve(load_basis_size);
+	for (size_t i = 0; i < load_basis_size; ++i)
+	  if (!found_flag[i]) index_not_found.push_back(i);
 	det_vector<size_t> send_basis(index_not_found.size());
 	std::vector<ElemT> send_w(index_not_found.size());
 	for(size_t k=0; k < index_not_found.size(); k++) {
@@ -109,17 +116,20 @@ namespace sbd {
 	for(int slide=1; slide < mpi_size_b; slide++) {
 	  MpiSlide(send_basis,load_basis,1,b_comm);
 	  MpiSlide(send_w,load_w,1,b_comm);
-	  index_not_found.resize(0);
-	  index_not_found.reserve(load_basis.size());
-	  for(size_t i=0; i < load_basis.size(); i++) {
-	    auto itn = std::lower_bound(basis.begin(),basis.end(),load_basis[i],cmp);
-	    if( itn == basis.end() || *itn != load_basis[i] ) {
-	      index_not_found.push_back(i);
-	    } else {
-	      auto n = static_cast<size_t>(itn - basis.begin());
-	      w[n] = load_w[i];
+	  const size_t slide_sz = load_basis.size();
+	  std::vector<char> slide_found(slide_sz, 0);
+	  #pragma omp parallel for schedule(static)
+	  for (size_t i = 0; i < slide_sz; ++i) {
+	    auto it = std::lower_bound(basis.begin(), basis.end(), load_basis[i], cmp);
+	    if (it != basis.end() && *it == load_basis[i]) {
+	      w[static_cast<size_t>(it - basis.begin())] = load_w[i];
+	      slide_found[i] = 1;
 	    }
 	  }
+	  index_not_found.clear();
+	  index_not_found.reserve(slide_sz);
+	  for (size_t i = 0; i < slide_sz; ++i)
+	    if (!slide_found[i]) index_not_found.push_back(i);
 	  send_basis.resize(index_not_found.size());
 	  send_w.resize(index_not_found.size());
 	  for(size_t k=0; k < index_not_found.size(); k++) {
