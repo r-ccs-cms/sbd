@@ -90,7 +90,7 @@ namespace sbd {
     size_t ia_count = 0;
     for(size_t ia=adet_begin; ia < adet_end; ia++) {
       if( adet_count[ia] > 0 ) {
-	new_adet_local[ia_count++] = adet[ia];
+	assign_det(new_adet_local[ia_count++], adet[ia]);
       }
     }
 
@@ -109,7 +109,7 @@ namespace sbd {
     size_t ib_count = 0;
     for(size_t ib=bdet_begin; ib < bdet_end; ib++) {
       if( bdet_count[ib] > 0 ) {
-	new_bdet_local[ib_count++] = bdet[ib];
+	assign_det(new_bdet_local[ib_count++], bdet[ib]);
       }
     }
     hdet_ex.resize(max_single_from_b);
@@ -226,7 +226,7 @@ namespace sbd {
 
     size_t ia_count = 0;
     for(size_t ia=adet_begin; ia < adet_end; ia++) {
-      new_adet_local[ia_count++] = adet[ia];
+      assign_det(new_adet_local[ia_count++], adet[ia]);
     }
     std::vector<std::vector<size_t>> hdet_ex(max_single_from_a);
     std::vector<int> open_adet(norb-num_one_a);
@@ -242,7 +242,7 @@ namespace sbd {
 
     size_t ib_count = 0;
     for(size_t ib=bdet_begin; ib < bdet_end; ib++) {
-      new_bdet_local[ib_count++] = bdet[ib];
+      assign_det(new_bdet_local[ib_count++], bdet[ib]);
     }
     hdet_ex.resize(max_single_from_b);
     std::vector<int> open_bdet(norb-num_one_a);

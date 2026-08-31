@@ -281,8 +281,11 @@ namespace sbd {
     h.resize(k);
     for(IntT i=0; i < k; i++) {
       InnerProduct(V[i],W,h[i],comm);
+      ElemT hi = h[i];
+      const std::vector<ElemT> & Vi = V[i];
+#pragma omp parallel for schedule(static)
       for(size_t s=0; s < W.size(); s++) {
-	W[s] -= h[i] * V[i][s];
+	W[s] -= hi * Vi[s];
       }
     }
   }

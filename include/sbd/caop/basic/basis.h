@@ -7,6 +7,11 @@
 
 #include <sys/stat.h>
 #include <iomanip>
+#include <atomic>
+#include <cstdio>
+#include <type_traits>
+
+#include <omp.h>
 
 #include "sbd/framework/type_def.h"
 #include "sbd/framework/mpi_utility.h"
@@ -20,13 +25,49 @@ namespace sbd {
 		      size_t total_bit_length,
 		      MPI_Comm comm) {
     int mpi_size; MPI_Comm_size(comm,&mpi_size);
+    int mpi_rank; MPI_Comm_rank(comm,&mpi_rank);
+
+    // Fast-path: if every rank already holds its target count of records AND
+    // its slice is locally sorted, the shuffle and re-sort inside
+    // mpi_redistribution are both no-ops.  Skip them.
+    //
+    // This fires at r=1 (trivially: mpi_size==1), and also at r>1 when
+    // load_basis_from_files has already k-way-merged the files into sorted
+    // per-rank slices of equal size (the common case with equal-size shards).
+    //
+    // Cost of the check: one MPI_Allreduce (size_t) + one MPI_Allreduce (int)
+    // + an O(n/r) sequential sorted scan — negligible vs the sort it avoids.
+    {
+      size_t local_n = static_cast<size_t>(config.size());
+      size_t total_n = 0;
+      MPI_Allreduce(&local_n, &total_n, 1, SBD_MPI_SIZE_T, MPI_SUM, comm);
+
+      // Compute the target [want_begin, want_end) range for this rank using the
+      // same formula that mpi_redistribution uses internally (get_mpi_range).
+      size_t want_begin = 0, want_end = total_n;
+      get_mpi_range(mpi_size, mpi_rank, want_begin, want_end);
+      size_t want_n = want_end - want_begin;
+
+      // Local checks: correct count AND locally sorted.
+      bool local_ok = (local_n == want_n);
+      if (local_ok && local_n > 1) {
+        for (size_t i = 1; i < local_n && local_ok; ++i)
+          if (less_from_back(config[i], config[i-1])) local_ok = false;
+      }
+
+      int local_ok_i = static_cast<int>(local_ok);
+      int all_ok = 0;
+      MPI_Allreduce(&local_ok_i, &all_ok, 1, MPI_INT, MPI_LAND, comm);
+      if (all_ok) return;
+    }
+
     Container config_begin(mpi_size);
     Container config_end(mpi_size);
     std::vector<size_t> index_begin(mpi_size);
     std::vector<size_t> index_end(mpi_size);
     mpi_redistribution(config,config_begin,config_end,index_begin,index_end,
 		       total_bit_length,bit_length,comm);
-    
+
   }
   
 
@@ -206,9 +247,14 @@ namespace sbd {
     if( get_extension(filename) == std::string("txt") ) {
       // Fast path: text is regular fixed-width records (total_bit_length chars of
       // '0'/'1' + '\n').  Read the whole file in one shot and parse in-place.
+      int rank = 0; MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+      // --- open ---
+      double t0 = omp_get_wtime();
       std::ifstream ifs(filename, std::ios::binary);
       if( !ifs.is_open() )
 	throw std::runtime_error("Failed to open basis bit-string file.");
+      double t_open = omp_get_wtime();
 
       ifs.seekg(0, std::ios::end);
       const size_t file_size = ifs.tellg();
@@ -218,26 +264,56 @@ namespace sbd {
       const size_t num_records = (file_size + 1) / record_size;
       const size_t num_words   = (total_bit_length + bit_length - 1) / bit_length;
 
+      // --- alloc read buffer (zero-init touches all pages) ---
       std::vector<char> buf(file_size);
+      double t_alloc = omp_get_wtime();
+
+      // --- read ---
       ifs.read(buf.data(), file_size);
       if( !ifs )
 	throw std::runtime_error("Failed to read basis bit-string file.");
+      double t_read = omp_get_wtime();
 
+      // --- alloc output container (single flat allocation of num_records * num_words * 8B) ---
       config.resize(num_records);
+      double t_resize = omp_get_wtime();
+
+      // --- parse: each thread processes its own row range in the flat buffer ---
+      std::atomic<bool> parse_error{false};
+      #pragma omp parallel for schedule(static)
       for(size_t i = 0; i < num_records; i++) {
-	const char* rec = buf.data() + i * record_size;
-	config[i].resize(num_words);
-	std::fill(config[i].begin(), config[i].end(), size_t(0));
-	for(size_t j = 0; j < total_bit_length; j++) {
-	  if( rec[j] == '1' ) {
-	    size_t bit_idx = total_bit_length - 1 - j;
-	    config[i][bit_idx / bit_length] |= (size_t(1) << (bit_idx % bit_length));
-	  } else if( rec[j] != '0' ) {
-	    throw std::runtime_error(
-	      "Unexpected character in basis file: expected '0' or '1'");
-	  }
-	}
+        config[i].resize(num_words);
+        std::fill(config[i].begin(), config[i].end(), size_t(0));
+        const char* rec = buf.data() + i * record_size;
+        for(size_t j = 0; j < total_bit_length; j++) {
+          if( rec[j] == '1' ) {
+            size_t bit_idx = total_bit_length - 1 - j;
+            config[i][bit_idx / bit_length] |= (size_t(1) << (bit_idx % bit_length));
+          } else if( rec[j] != '0' ) {
+            parse_error.store(true, std::memory_order_relaxed);
+          }
+        }
       }
+      if( parse_error.load() )
+        throw std::runtime_error(
+          "Unexpected character in basis file: expected '0' or '1'");
+      double t_parse = omp_get_wtime();
+
+      // Report per-rank, per-file breakdown to stderr.
+      const double read_dt = t_read - t_alloc;
+      const double read_bw = (read_dt > 1e-6) ? file_size / read_dt / 1e6 : 0.0;
+      fprintf(stderr,
+        "basis-timing rank=%d file=%s size=%.0fMB "
+        "open=%.3fs buf_alloc=%.3fs read=%.3fs(%.0fMB/s) "
+        "cfg_alloc=%.3fs parse=%.3fs total=%.3fs\n",
+        rank, filename.c_str(), file_size / 1.0e6,
+        t_open   - t0,
+        t_alloc  - t_open,
+        read_dt, read_bw,
+        t_resize - t_read,
+        t_parse  - t_resize,
+        t_parse  - t0);
+      fflush(stderr);
     } else if ( get_extension(filename) == std::string("bin") ) {
       std::ifstream ifs(filename, std::ios::binary);
       if( !ifs.is_open() ) {
@@ -300,6 +376,83 @@ namespace sbd {
     return filename;
   }
 
+  // ---- Helper: is_sorted_fromback -----------------------------------------
+  // O(n) check: is container a sorted in less_from_back order?
+  // Works for det_vector<size_t> (rows have size() and operator[]).
+  template<typename Container>
+  bool is_sorted_fromback(const Container& a) {
+    const size_t n = a.size();
+    if (n <= 1) return true;
+    for (size_t i = 1; i < n; ++i) {
+      if (less_from_back(a[i], a[i-1]))  // a[i] < a[i-1] → out of order
+        return false;
+    }
+    return true;
+  }
+
+  // ---- Helper: kway_merge_detvec -------------------------------------------
+  // K-way merge of k already-sorted det_vector<size_t> sources into dest.
+  // Uses a min-heap over (row-pointer, source-index, row-index).
+  // Deduplicates identical rows (consistent with sort_bitarray semantics).
+  // Precondition: every sources[i] is sorted in less_from_back order.
+  template<det_kind Kind>
+  void kway_merge_detvec(std::vector<det_vector<size_t, Kind>>& sources,
+                         det_vector<size_t, Kind>& dest) {
+    const int k = static_cast<int>(sources.size());
+    if (k == 0) { dest.clear(); return; }
+    if (k == 1) { dest = std::move(sources[0]); return; }
+
+    size_t total = 0;
+    for (auto& s : sources) total += s.size();
+    dest.resize(total);  // over-allocate; trimmed to unique_n at end
+
+    const size_t row_len = sources[0].elem_size();
+
+    struct Entry { size_t* ptr; int src; size_t idx; };
+    // STL heap is a max-heap; comparator inverted so smallest row is at top.
+    const auto heap_cmp = [row_len](const Entry& a, const Entry& b) noexcept {
+      for (int w = static_cast<int>(row_len) - 1; w >= 0; --w) {
+        if (b.ptr[w] < a.ptr[w]) return true;   // b < a → a should not be at top
+        if (b.ptr[w] > a.ptr[w]) return false;
+      }
+      return false;
+    };
+
+    std::vector<Entry> heap;
+    heap.reserve(k);
+    for (int i = 0; i < k; ++i)
+      if (!sources[i].empty())
+        heap.push_back({sources[i][0].data(), i, 0});
+    std::make_heap(heap.begin(), heap.end(), heap_cmp);
+
+    size_t out = 0;
+    while (!heap.empty()) {
+      std::pop_heap(heap.begin(), heap.end(), heap_cmp);
+      Entry e = heap.back(); heap.pop_back();
+
+      // Dedup: skip if equal to last written row.
+      if (out == 0 || std::memcmp(dest[out-1].data(), e.ptr,
+                                   row_len * sizeof(size_t)) != 0) {
+        std::memcpy(dest[out].data(), e.ptr, row_len * sizeof(size_t));
+        ++out;
+      }
+
+      if (e.idx + 1 < sources[e.src].size()) {
+        e.idx++;
+        e.ptr = sources[e.src][e.idx].data();
+        heap.push_back(e);
+        std::push_heap(heap.begin(), heap.end(), heap_cmp);
+      }
+    }
+    dest.resize(out);  // trim to unique count
+  }
+
+  // ---- load_basis_from_files -----------------------------------------------
+  // Loads the rank's assigned shard files sequentially, checks each is sorted
+  // (aborts with an error if not — sort files in advance with
+  // scripts/sort-basis-shards.py), then k-way merges the sorted runs.
+  // The sort_bitarray() call that previously dominated (~28 s at r=1 for 100M
+  // records) is eliminated: the merge is O(n log k) with k = files-per-rank.
   template<typename Container>
   void load_basis_from_files(const std::vector<std::string> & all_filenames,
 			     Container & config,
@@ -308,17 +461,14 @@ namespace sbd {
 			     MPI_Comm comm) {
     int mpi_rank; MPI_Comm_rank(comm, &mpi_rank);
     int mpi_size; MPI_Comm_size(comm, &mpi_size);
-    
+
     const int num_files = static_cast<int>(all_filenames.size());
     config.clear();
-    
     if (num_files == 0) return;
-    
+
     const int base = num_files / mpi_size;
     const int rem  = num_files % mpi_size;
-
-    int my_first = 0;
-    int my_count = 0;
+    int my_first = 0, my_count = 0;
     if (mpi_rank < rem) {
       my_count = base + 1;
       my_first = mpi_rank * my_count;
@@ -326,19 +476,134 @@ namespace sbd {
       my_count = base;
       my_first = rem * (base + 1) + (mpi_rank - rem) * base;
     }
-    const int my_last = my_first + my_count;
-    
-    for (int i = my_first; i < my_last; ++i) {
-      const std::string & fname = all_filenames[i];
-      
-      Container local;
-      load_basis_from_file(fname, local, bit_length, total_bit_length);
-      
-      config.insert(config.end(),
-		    std::make_move_iterator(local.begin()),
-		    std::make_move_iterator(local.end()));
+
+    if constexpr (std::is_same_v<Container, det_vector<size_t>>) {
+      // Fast path for det_vector<size_t>: check-sorted + k-way merge.
+      double t0 = omp_get_wtime();
+
+      // Load files sequentially (concurrent reads contend on shared FS).
+      std::vector<Container> per_file(my_count);
+      for (int i = 0; i < my_count; ++i)
+        load_basis_from_file(all_filenames[my_first + i], per_file[i],
+                             bit_length, total_bit_length);
+      double t_load = omp_get_wtime();
+
+      // Require each file to be sorted; abort otherwise.
+      // Sort files once in advance with: python3 scripts/sort-basis-shards.py FILE...
+      for (int i = 0; i < my_count; ++i) {
+        if (!is_sorted_fromback(per_file[i])) {
+          fprintf(stderr,
+            "load_basis_from_files rank=%d: ERROR file not sorted: %s\n"
+            "  Sort shard files in advance with:\n"
+            "    python3 scripts/sort-basis-shards.py FILE...\n",
+            mpi_rank, all_filenames[my_first + i].c_str());
+          fflush(stderr);
+          MPI_Abort(comm, 1);
+        }
+      }
+      double t_check = omp_get_wtime();
+
+      // K-way merge of sorted runs, or plain concatenation if globally ordered.
+      bool globally_ordered = (my_count <= 1);
+      if (!globally_ordered) {
+        globally_ordered = true;
+        for (int i = 0; i + 1 < my_count && globally_ordered; ++i) {
+          if (!per_file[i].empty() && !per_file[i+1].empty()) {
+            // last of per_file[i] must be <= first of per_file[i+1]
+            if (less_from_back(per_file[i+1][0],
+                               per_file[i][per_file[i].size()-1]))
+              globally_ordered = false;
+          }
+        }
+      }
+
+      if (globally_ordered) {
+        for (int i = 0; i < my_count; ++i)
+          config.insert(config.end(), per_file[i].begin(), per_file[i].end());
+      } else {
+        kway_merge_detvec(per_file, config);
+      }
+      double t_done = omp_get_wtime();
+
+      fprintf(stderr,
+        "load-files rank=%d files=%d: load=%.3fs check=%.3fs "
+        "merge=%.3fs(globally_ordered=%d) total=%.3fs\n",
+        mpi_rank, my_count,
+        t_load - t0, t_check - t_load,
+        t_done - t_check, (int)globally_ordered,
+        t_done - t0);
+      fflush(stderr);
+
+      // ---- Global sorted-and-no-cross-shard-dup check -------------------------
+      // Send this rank's last element to rank+1; rank+1 verifies its first
+      // element is strictly greater.  Cost: one MPI_Sendrecv of row_len*8 bytes.
+      // Catches overlapping shard ranges (e.g. round-robin gen_bits.py output)
+      // that are individually sorted but collectively non-monotone across ranks.
+      if (mpi_size > 1) {
+        const size_t row_len = (config.empty() ? 0 : config.elem_size());
+        size_t max_row_len = 0;
+        MPI_Allreduce(&row_len, &max_row_len, 1, SBD_MPI_SIZE_T, MPI_MAX, comm);
+
+        if (max_row_len > 0) {
+          // Send last element (or all-zeros sentinel if this rank is empty).
+          std::vector<size_t> send_buf(max_row_len, 0);
+          if (!config.empty()) {
+            const auto& last = config[config.size() - 1];
+            std::memcpy(send_buf.data(), last.data(), max_row_len * sizeof(size_t));
+          }
+          std::vector<size_t> recv_buf(max_row_len, 0);
+
+          const int send_to   = (mpi_rank + 1) % mpi_size;
+          const int recv_from = (mpi_rank - 1 + mpi_size) % mpi_size;
+          MPI_Sendrecv(send_buf.data(), static_cast<int>(max_row_len), SBD_MPI_SIZE_T,
+                       send_to,   98,
+                       recv_buf.data(), static_cast<int>(max_row_len), SBD_MPI_SIZE_T,
+                       recv_from, 98, comm, MPI_STATUS_IGNORE);
+
+          // Rank 0's recv_buf is rank (mpi_size-1)'s last element — wrap-around,
+          // not a continuity constraint.  Only check ranks 1..mpi_size-1.
+          bool local_ok = true;
+          if (mpi_rank > 0 && !config.empty()) {
+            const auto& my_first = config[0];
+            bool is_dup = (std::memcmp(my_first.data(), recv_buf.data(),
+                                       max_row_len * sizeof(size_t)) == 0);
+            bool out_of_order = less_from_back(my_first, recv_buf);
+            local_ok = !is_dup && !out_of_order;
+          }
+
+          int local_ok_i = static_cast<int>(local_ok);
+          int all_ok = 0;
+          MPI_Allreduce(&local_ok_i, &all_ok, 1, MPI_INT, MPI_LAND, comm);
+
+          if (!all_ok) {
+            if (mpi_rank == 0) {
+              fprintf(stderr,
+                "sbd: ERROR: basis shards are not globally sorted or contain\n"
+                "  cross-shard duplicate records.  Each shard must cover a\n"
+                "  non-overlapping sorted range (as produced by gdet).\n"
+                "  Fix: regenerate shards with:\n"
+                "    python3 sbd/apps/caop_selected_basis_diagonalization/gen_bits.py"
+                " --sorted-split ...\n"
+                "  or run gdet on the alpha-det file.\n");
+              fflush(stderr);
+            }
+            MPI_Abort(comm, 1);
+          }
+        }
+      }
+
+    } else {
+      // Fallback for other Container types (e.g. std::vector<std::vector<size_t>>):
+      // original sequential load + sort_bitarray.
+      for (int i = my_first; i < my_first + my_count; ++i) {
+        Container local;
+        load_basis_from_file(all_filenames[i], local, bit_length, total_bit_length);
+        config.insert(config.end(),
+                      std::make_move_iterator(local.begin()),
+                      std::make_move_iterator(local.end()));
+      }
+      sort_bitarray(config);
     }
-    sort_bitarray(config);
   }
   
   // load single file

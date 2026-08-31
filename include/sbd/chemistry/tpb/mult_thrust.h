@@ -5,8 +5,10 @@
 #ifndef SBD_CHEMISTRY_TPB_MULT_THRUST_H
 #define SBD_CHEMISTRY_TPB_MULT_THRUST_H
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <vector>
 
 #ifdef SBD_USE_NCCL
 #include <nccl.h>
@@ -203,15 +205,11 @@ void MultTPBThrust<ElemT>::Init(
         bdets_size = std::max(bdets_size, helper[task].braBetaEnd - helper[task].braBetaStart);
     }
 
-    // copyin adets, bdets
+    // copyin adets, bdets: det_vector is flat-packed, one H2D per array.
     adets.resize(this->D_half_size_ * adets_in.size());
+    thrust::copy_n(adets_in.cflat().data(), adets.size(), adets.begin());
     bdets.resize(this->D_half_size_ * bdets_in.size());
-    for (int i = 0; i < adets_in.size(); i++) {
-        thrust::copy_n(adets_in[i].begin(), this->D_half_size_, adets.begin() + i * this->D_half_size_);
-    }
-    for (int i = 0; i < bdets_in.size(); i++) {
-        thrust::copy_n(bdets_in[i].begin(), this->D_half_size_, bdets.begin() + i * this->D_half_size_);
-    }
+    thrust::copy_n(bdets_in.cflat().data(), bdets.size(), bdets.begin());
 
     dets_size = 0;
     if (use_precalculated_dets) {

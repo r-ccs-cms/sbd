@@ -9,8 +9,8 @@ namespace sbd {
 
 #ifdef SBD_TRADMODE
 
-  std::vector<size_t> DetFromAlphaBeta(const std::vector<size_t> & A,
-                                       const std::vector<size_t> & B,
+  template<typename ADetT, typename BDetT>
+  std::vector<size_t> DetFromAlphaBeta(const ADetT& A, const BDetT& B,
                                        const size_t bit_length,
                                        const size_t L) {
     int dsize = (2*L + bit_length - 1) / bit_length;
@@ -52,11 +52,11 @@ namespace sbd {
     return D;
   }
 
-  void DetFromAlphaBeta(const std::vector<size_t> & A,
-                        const std::vector<size_t> & B,
+  template<typename ADetT, typename BDetT, typename DetT>
+  void DetFromAlphaBeta(const ADetT& A, const BDetT& B,
                         const size_t bit_length,
                         const size_t L,
-                        std::vector<size_t> & D) {
+                        DetT& D) {
     int fsize = L / bit_length;
     int half = bit_length / 2;
     int extra = L - fsize*bit_length;
@@ -94,8 +94,8 @@ namespace sbd {
   }
 
 #else
-  std::vector<size_t> DetFromAlphaBeta(const std::vector<size_t>& A,
-				       const std::vector<size_t>& B,
+  template<typename ADetT, typename BDetT>
+  std::vector<size_t> DetFromAlphaBeta(const ADetT& A, const BDetT& B,
 				       const size_t bit_length,
 				       const size_t L) {
     size_t D_size = (2*L+bit_length-1)/bit_length;
@@ -118,11 +118,11 @@ namespace sbd {
     return D;
   }
 
-  void DetFromAlphaBeta(const std::vector<size_t> & A,
-			const std::vector<size_t> & B,
+  template<typename ADetT, typename BDetT, typename DetT>
+  void DetFromAlphaBeta(const ADetT& A, const BDetT& B,
 			const size_t bit_length,
 			const size_t L,
-			std::vector<size_t> & D) {
+			DetT& D) {
     std::fill(D.begin(),D.end(),static_cast<size_t>(0));
     for(size_t i=0; i < L; ++i) {
       size_t block = i / bit_length;
@@ -174,7 +174,8 @@ namespace sbd {
     return (det[index] >> bit_pos) & 1;
   }
 
-  inline int bitcount(const std::vector<size_t> & det,
+  template<typename DetT>
+  inline int bitcount(const DetT& det,
 		      const size_t bit_length,
 		      const size_t L) {
     int count = 0;
@@ -190,7 +191,8 @@ namespace sbd {
     return count;
   }
 
-  int getClosed(const std::vector<size_t> & det,
+  template<typename DetT>
+  int getClosed(const DetT & det,
 		const size_t bit_length,
 		const size_t L,
 		std::vector<int> & closed) {
@@ -206,11 +208,12 @@ namespace sbd {
     return cindex;
   }
 
-  int getOpenClosed(const std::vector<size_t> & det,
+  template<typename DetT>
+  int getOpenClosed(const DetT& det,
 		    const size_t bit_length,
 		    const size_t L,
-		    std::vector<int> & open,
-		    std::vector<int> & closed) {
+		    std::vector<int>& open,
+		    std::vector<int>& closed) {
     int cindex = 0;
     int oindex = 0;
     int csize = bitcount(det,bit_length,L);
@@ -228,7 +231,8 @@ namespace sbd {
     return cindex;
   }
 
-  void parity(const std::vector<size_t> & dets,
+  template<typename DetT>
+  void parity(const DetT & dets,
 	      const size_t bit_length,
 	      const int & start, const int & end, double& sgn) {
     if (start > end) {
@@ -328,10 +332,11 @@ namespace sbd {
     return beta;
   }
 
-  void getAdet(const std::vector<size_t> & det,
+  template<typename DetT>
+  void getAdet(const DetT& det,
 	       size_t bit_length,
 	       size_t norb,
-	       std::vector<size_t> & adet) {
+	       std::vector<size_t>& adet) {
     size_t adet_size = (norb + bit_length - 1 ) / bit_length;
     if( adet_size != adet.size() ) {
       adet.resize(adet_size);
@@ -345,10 +350,11 @@ namespace sbd {
     }
   }
 
-  void getBdet(const std::vector<size_t>& det,
+  template<typename DetT>
+  void getBdet(const DetT& det,
 	       size_t bit_length,
 	       size_t norb,
-	       std::vector<size_t> & bdet) {
+	       std::vector<size_t>& bdet) {
     size_t bdet_size = (norb + bit_length - 1 ) / bit_length;
     if( bdet_size != bdet.size() ) {
       bdet.resize(bdet_size);
@@ -434,8 +440,8 @@ namespace sbd {
     }
   }
 
-  template <typename ElemT>
-  ElemT ZeroExcite(const std::vector<size_t> & det,
+  template <typename ElemT, typename DetT>
+  ElemT ZeroExcite(const DetT & det,
 		   const size_t bit_length,
 		   const size_t L,
 		   const ElemT & I0,
@@ -459,8 +465,8 @@ namespace sbd {
         return energy + I0;
   }
 
-  template <typename ElemT>
-  ElemT OneExcite(const std::vector<size_t> & det,
+  template <typename ElemT, typename DetT>
+  ElemT OneExcite(const DetT & det,
 		  const size_t bit_length,
 		  int & i,
 		  int & a,
@@ -483,8 +489,8 @@ namespace sbd {
         return energy;
   }
 
-  template <typename ElemT>
-  ElemT TwoExcite(const std::vector<size_t> & det,
+  template <typename ElemT, typename DetT>
+  ElemT TwoExcite(const DetT & det,
 		  const size_t bit_length,
 		  int & i,
 		  int & j,

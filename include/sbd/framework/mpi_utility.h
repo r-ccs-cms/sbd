@@ -502,32 +502,35 @@ namespace sbd {
     }
   }
 
+// v5: use MPI_IN_PLACE to eliminate the 200 MB heap allocation that the prior
+// std::vector<ElemT> B(A) pattern incurred on every call.  With IN_PLACE, A
+// serves as both send and receive buffer; on a size-1 communicator MPICH
+// returns immediately with no data movement.
+
 #ifdef SBD_TRADMODE
   template <typename ElemT>
   void MpiAllreduce(std::vector<ElemT> & A, MPI_Op op, MPI_Comm comm) {
     MPI_Datatype DataT = GetMpiType<ElemT>::MpiT;
-    std::vector<ElemT> B(A);
 #if MPI_VERSION >= 4
-    MPI_Allreduce_c(B.data(),A.data(),A.size(),DataT,op,comm);
+    MPI_Allreduce_c(MPI_IN_PLACE,A.data(),A.size(),DataT,op,comm);
 #else
     if (A.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
         throw std::runtime_error("MPI_Allreduce: count exceeds INT_MAX (MPI<4). Use MPI-4 *_c API.");
     }
-    MPI_Allreduce(B.data(),A.data(),static_cast<int>(A.size()),DataT,op,comm);
+    MPI_Allreduce(MPI_IN_PLACE,A.data(),static_cast<int>(A.size()),DataT,op,comm);
 #endif
   }
 
   template <>
   void MpiAllreduce(std::vector<size_t> & A, MPI_Op op, MPI_Comm comm) {
     MPI_Datatype DataT = SBD_MPI_SIZE_T;
-    std::vector<size_t> B(A);
 #if MPI_VERSION >= 4
-    MPI_Allreduce_c(B.data(),A.data(),A.size(),DataT,op,comm);
+    MPI_Allreduce_c(MPI_IN_PLACE,A.data(),A.size(),DataT,op,comm);
 #else
     if (A.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
         throw std::runtime_error("MPI_Allreduce: count exceeds INT_MAX (MPI<4). Use MPI-4 *_c API.");
     }
-    MPI_Allreduce(B.data(),A.data(),static_cast<int>(A.size()),DataT,op,comm);
+    MPI_Allreduce(MPI_IN_PLACE,A.data(),static_cast<int>(A.size()),DataT,op,comm);
 #endif
   }
 #else
@@ -539,14 +542,13 @@ namespace sbd {
     } else {
       DataT = GetMpiType<ElemT>::MpiT;
     }
-    std::vector<ElemT> B(A);
 #if MPI_VERSION >= 4
-    MPI_Allreduce_c(B.data(),A.data(),A.size(),DataT,op,comm);
+    MPI_Allreduce_c(MPI_IN_PLACE,A.data(),A.size(),DataT,op,comm);
 #else
     if (A.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
         throw std::runtime_error("MPI_Allreduce: count exceeds INT_MAX (MPI<4). Use MPI-4 *_c API.");
     }
-    MPI_Allreduce(B.data(),A.data(),static_cast<int>(A.size()),DataT,op,comm);
+    MPI_Allreduce(MPI_IN_PLACE,A.data(),static_cast<int>(A.size()),DataT,op,comm);
 #endif
   }
 #endif

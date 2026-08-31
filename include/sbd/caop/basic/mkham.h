@@ -19,12 +19,11 @@ namespace sbd {
     hii.resize(bs.size(),ElemT(0.0));
 #pragma omp parallel
     {
-      std::vector<size_t> v;
       size_t size_t_one = static_cast<size_t>(1);
       bool check;
 #pragma omp for
       for(size_t ib=0; ib < bs.size(); ib++) {
-	v = bs[ib];
+	const auto& v = bs[ib];
 	for(size_t n=0; n < H.d_.size(); n++) {
 	  check = false;
 	  for(int k=0; k < H.d_[n].n_dag_; k++) {
@@ -98,27 +97,36 @@ namespace sbd {
 
 #pragma omp parallel
       {
-	// round-robin assignment of work to threads
-	size_t thread_id = omp_get_thread_num();
-	size_t ib_start = thread_id;
-	size_t ib_end   = brasize;
-	size_t reserve_size = brasize * num_terms / num_thread;
+	// Round-robin assignment of work to threads.
+	// When num_thread > 1, thread 0 is reserved for MPI overlap in mult()
+	// and receives no COO rows.  Threads 1..N-1 cover all brasize rows using
+	// a stride of num_compute = num_thread - 1.
+	// When num_thread == 1, thread 0 covers all rows (unchanged behaviour).
+	size_t thread_id  = omp_get_thread_num();
+	size_t ib_end     = brasize;
+	size_t num_compute = (num_thread > 1) ? (num_thread - 1) : size_t(1);
+	// ib_start: thread 0 gets ib_end (empty loop) when multi-threaded;
+	//           thread k>0 starts at k-1 so threads cover {0, 1, ..., N-2, N-1, ...}
+	size_t ib_start   = (num_thread > 1)
+	                      ? (thread_id > 0 ? thread_id - 1 : ib_end)
+	                      : size_t(0);
+	size_t reserve_size = (thread_id == 0 && num_thread > 1)
+	                      ? size_t(0) : brasize * num_terms / num_compute;
 	ih[task][thread_id].reserve(reserve_size);
 	jh[task][thread_id].reserve(reserve_size);
 	hij[task][thread_id].reserve(reserve_size);
 
-	std::vector<size_t> vb;
 	std::vector<size_t> vk;
 	size_t size_t_one = static_cast<size_t>(1);
 	int sign_count;
 	bool check;
-	
-	for(size_t ib=ib_start; ib < ib_end; ib+=num_thread) {
 
-	  vb = bs[ib];
+	for(size_t ib=ib_start; ib < ib_end; ib+=num_compute) {
+
+	  const auto& vb = bs[ib];
 	  for(size_t n=0; n < H.o_.size(); n++) {
 	    sign_count = 1;
-	    vk = vb;
+	    assign_det(vk, vb);
 	    check = false;
 	    for(int k=0; k < H.o_[n].n_dag_; k++) {
 	      size_t q = static_cast<size_t>(H.o_[n].fops_[k].q_);

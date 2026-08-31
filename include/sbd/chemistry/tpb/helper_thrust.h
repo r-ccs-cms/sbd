@@ -6,6 +6,7 @@
 #define SBD_CHEMISTRY_TPB_HELPER_THRUST_H
 
 #include <cassert>
+#include <vector>
 
 #include "sbd/chemistry/tpb/helper.h"
 #include <thrust/device_vector.h>
@@ -176,29 +177,50 @@ public:
         storage.resize(size);
         base_memory = (size_t*)thrust::raw_pointer_cast(storage.data());
 
+        // Single host staging buffer; one H2D for all excitation blocks.
+        std::vector<size_t> staging(size);
         size_t count = 0;
+
+        auto fill_block = [&](auto SM, auto Len, const std::vector<size_t> &offset,
+                              size_t braSize, size_t total, size_t braStart, bool with_bra) {
+            const size_t base = count;
+#pragma omp parallel for
+            for (size_t i = 0; i < braSize; i++) {
+                const size_t off = offset[i];
+                const size_t len = Len[i];
+                for (size_t j = 0; j < len; j++) {
+                    staging[base + off + j] = SM[i][j];
+                }
+                if (with_bra) {
+                    for (size_t j = 0; j < len; j++) {
+                        staging[base + total + off + j] = i + braStart;
+                    }
+                }
+            }
+        };
+
         if (store_offset) {
             // store offsets for non-collapsed loop calculation
             if (taskType != 1) {
                 SinglesFromAlphaOffset = base_memory + count;
-                thrust::copy_n(offset_single_alpha.begin(), braAlphaSize + 1, storage.begin() + count);
+                std::copy_n(offset_single_alpha.data(), braAlphaSize + 1, staging.data() + count);
                 count += braAlphaSize + 1;
 
                 if (taskType == 2) {
                     DoublesFromAlphaOffset = base_memory + count;
-                    thrust::copy_n(offset_double_alpha.begin(), braAlphaSize + 1, storage.begin() + count);
+                    std::copy_n(offset_double_alpha.data(), braAlphaSize + 1, staging.data() + count);
                     count += braAlphaSize + 1;
                 }
             }
 
             if (taskType != 2) {
                 SinglesFromBetaOffset = base_memory + count;
-                thrust::copy_n(offset_single_beta.begin(), braBetaSize + 1, storage.begin() + count);
+                std::copy_n(offset_single_beta.data(), braBetaSize + 1, staging.data() + count);
                 count += braBetaSize + 1;
 
                 if (taskType == 1) {
                     DoublesFromBetaOffset = base_memory + count;
-                    thrust::copy_n(offset_double_beta.begin(), braBetaSize + 1, storage.begin() + count);
+                    std::copy_n(offset_double_beta.data(), braBetaSize + 1, staging.data() + count);
                     count += braBetaSize + 1;
                 }
             }
@@ -215,28 +237,24 @@ public:
                 SinglesFromAlphaKetIndex = base_memory + count;
                 SinglesFromAlphaBraIndex = base_memory + count + size_single_alpha;
             }
-            for(size_t i=0; i < braAlphaSize; i++) {
-                thrust::copy_n(helper.SinglesFromAlphaSM[i], helper.SinglesFromAlphaLen[i], storage.begin() + count + offset_single_alpha[i]);
+            fill_block(helper.SinglesFromAlphaSM, helper.SinglesFromAlphaLen,
+                        offset_single_alpha, braAlphaSize, size_single_alpha,
+                        helper.braAlphaStart, !store_offset);
 #ifdef SBD_DEBUG
-                // **** DEBUG ****
+            // **** DEBUG ****
+            for(size_t i=0; i < braAlphaSize; i++) {
                 printf("[%s,%d] SinglesFromAlphaKetIndex: i=%llu, n=%llu, ", __FILE__, __LINE__,
                        i, helper.SinglesFromAlphaLen[i]);
                 for(size_t j=0; j <helper.SinglesFromAlphaLen[i];j++) {
                     printf(" %llu:%llu,", j, helper.SinglesFromAlphaSM[i][j]);
                 }
                 printf("\n");
-#endif
-            }
-            if (!store_offset) {
-                for(size_t i=0; i < braAlphaSize; i++) {
-                    thrust::fill_n(storage.begin() + size_single_alpha + count + offset_single_alpha[i], helper.SinglesFromAlphaLen[i], i + helper.braAlphaStart);
-#ifdef SBD_DEBUG
-                    // **** DEBUG ****
+                if (!store_offset) {
                     printf("[%s,%d] SinglesFromAlphaBraIndex: i=%llu, n=%llu, offset=%llu\n", __FILE__, __LINE__,
                            i, helper.SinglesFromAlphaLen[i], offset_single_alpha[i] );
-#endif
                 }
             }
+#endif
             count += size_single_alpha;
             if (!store_offset) {
                 count += size_single_alpha;
@@ -249,12 +267,9 @@ public:
                     DoublesFromAlphaKetIndex = base_memory + count;
                     DoublesFromAlphaBraIndex = base_memory + count + size_double_alpha;
                 }
-                for(size_t i=0; i < braAlphaSize; i++) {
-                    thrust::copy_n(helper.DoublesFromAlphaSM[i], helper.DoublesFromAlphaLen[i], storage.begin() + count + offset_double_alpha[i]);
-                    if (!store_offset) {
-                        thrust::fill_n(storage.begin() + count + size_double_alpha + offset_double_alpha[i], helper.DoublesFromAlphaLen[i], i + helper.braAlphaStart);
-                    }
-                }
+                fill_block(helper.DoublesFromAlphaSM, helper.DoublesFromAlphaLen,
+                            offset_double_alpha, braAlphaSize, size_double_alpha,
+                            helper.braAlphaStart, !store_offset);
                 count += size_double_alpha;
                 if (!store_offset) {
                     count += size_double_alpha;
@@ -273,28 +288,24 @@ public:
                 SinglesFromBetaKetIndex = base_memory + count;
                 SinglesFromBetaBraIndex = base_memory + count + size_single_beta;
             }
-            for(size_t i=0; i < braBetaSize; i++) {
-                thrust::copy_n(helper.SinglesFromBetaSM[i], helper.SinglesFromBetaLen[i], storage.begin() + count + offset_single_beta[i]);
+            fill_block(helper.SinglesFromBetaSM, helper.SinglesFromBetaLen,
+                        offset_single_beta, braBetaSize, size_single_beta,
+                        helper.braBetaStart, !store_offset);
 #ifdef SBD_DEBUG
-                // **** DEBUG ****
+            // **** DEBUG ****
+            for(size_t i=0; i < braBetaSize; i++) {
                 printf("[%s,%d] SinglesFromBetaKetIndex: i=%llu, n=%llu, ", __FILE__, __LINE__,
                        i, helper.SinglesFromBetaLen[i]);
                 for(size_t j=0; j <helper.SinglesFromBetaLen[i];j++) {
                     printf(" %llu:%llu,", j, helper.SinglesFromBetaSM[i][j]);
                 }
                 printf("\n");
-#endif
-            }
-            if (!store_offset) {
-                for(size_t i=0; i < braBetaSize; i++) {
-                    thrust::fill_n(storage.begin() + count + size_single_beta + offset_single_beta[i], helper.SinglesFromBetaLen[i], i + helper.braBetaStart);
-#ifdef SBD_DEBUG
-                    // **** DEBUG ****
+                if (!store_offset) {
                     printf("[%s,%d] SinglesFromBetaBraIndex: i=%llu, n=%llu, offset=%llu\n", __FILE__, __LINE__,
                            i, helper.SinglesFromBetaLen[i], offset_single_beta[i] );
-#endif
                 }
             }
+#endif
             count += size_single_beta;
             if (!store_offset) {
                 count += size_single_beta;
@@ -307,18 +318,18 @@ public:
                     DoublesFromBetaKetIndex = base_memory + count;
                     DoublesFromBetaBraIndex = base_memory + count + size_double_beta;
                 }
-                for(size_t i=0; i < braBetaSize; i++) {
-                    thrust::copy_n(helper.DoublesFromBetaSM[i], helper.DoublesFromBetaLen[i], storage.begin() + count + offset_double_beta[i]);
-                    if (!store_offset) {
-                        thrust::fill_n(storage.begin() + count + size_double_beta + offset_double_beta[i], helper.DoublesFromBetaLen[i], i + helper.braBetaStart);
-                    }
-                }
+                fill_block(helper.DoublesFromBetaSM, helper.DoublesFromBetaLen,
+                            offset_double_beta, braBetaSize, size_double_beta,
+                            helper.braBetaStart, !store_offset);
                 count += size_double_beta;
                 if (!store_offset) {
                     count += size_double_beta;
                 }
             }
         }
+
+        // single H2D for all excitation blocks
+        thrust::copy_n(staging.begin(), size, storage.begin());
 
         // convert CrAn from AoS to SoA
         size_t count_cran = 0;
@@ -443,8 +454,10 @@ public:
         std::vector<size_t> permutation;
         // constexpr size_t block_size = 16;
         constexpr size_t block_size = 32;
+#ifdef SBD_DEBUG_HELPER
         printf("[%s,%d] Reordering index arrays (block_size=%zu)\n",
                __FILE__, __LINE__, block_size);
+#endif
         // NOTE:
         // block_size controls the trade-off between improving locality
         // of KetIndex-based accesses and preserving BraIndex locality.
@@ -537,8 +550,10 @@ public:
 
         // Reorder alpha single-excitation arrays
         if (size_single_alpha > 0 && SinglesFromAlphaKetIndex) {
+#ifdef SBD_DEBUG_HELPER
             printf("[%s,%d] Reordering index arrays (size_single_alpha=%zu)\n",
                    __FILE__, __LINE__, size_single_alpha);
+#endif
             setup_permutation(SinglesFromAlphaKetIndex, size_single_alpha);
             reorder_device_array(SinglesFromAlphaKetIndex);
             reorder_device_array(SinglesFromAlphaBraIndex);
@@ -550,8 +565,10 @@ public:
 
         // Reorder beta single-excitation arrays
         if (size_single_beta > 0 && SinglesFromBetaKetIndex) {
+#ifdef SBD_DEBUG_HELPER
             printf("[%s,%d] Reordering index arrays (size_single_beta=%zu)\n",
                    __FILE__, __LINE__, size_single_beta);
+#endif
             setup_permutation(SinglesFromBetaKetIndex, size_single_beta);
             reorder_device_array(SinglesFromBetaKetIndex);
             reorder_device_array(SinglesFromBetaBraIndex);
@@ -563,8 +580,10 @@ public:
 
         // Reorder alpha double-excitation arrays
         if (size_double_alpha > 0 && DoublesFromAlphaKetIndex) {
+#ifdef SBD_DEBUG_HELPER
             printf("[%s,%d] Reordering index arrays (size_double_alpha=%zu)\n",
                    __FILE__, __LINE__, size_double_alpha);
+#endif
             setup_permutation(DoublesFromAlphaKetIndex, size_double_alpha);
             reorder_device_array(DoublesFromAlphaKetIndex);
             reorder_device_array(DoublesFromAlphaBraIndex);
@@ -578,8 +597,10 @@ public:
 
         // Reorder beta double-excitation arrays
         if (size_double_beta > 0 && DoublesFromBetaKetIndex) {
+#ifdef SBD_DEBUG_HELPER
             printf("[%s,%d] Reordering index arrays (size_double_beta=%zu)\n",
                    __FILE__, __LINE__, size_double_beta);
+#endif
             setup_permutation(DoublesFromBetaKetIndex, size_double_beta);
             reorder_device_array(DoublesFromBetaKetIndex);
             reorder_device_array(DoublesFromBetaBraIndex);

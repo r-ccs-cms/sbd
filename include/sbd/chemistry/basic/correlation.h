@@ -13,8 +13,8 @@ namespace sbd {
   /**
      Function for adding diagonal contribution
    */
-  template <typename ElemT>
-  void ZeroDiffCorrelation(const std::vector<size_t> & DetI,
+  template <typename ElemT, typename DetT>
+  void ZeroDiffCorrelation(const DetT & DetI,
 			   ElemT WeightI,
 			   size_t bit_length,
 			   size_t norb,
@@ -99,8 +99,8 @@ namespace sbd {
   /**
      Function for adding one-occupation different contribution
    */
-  template <typename ElemT>
-  void OneDiffCorrelation(const std::vector<size_t> & DetI,
+  template <typename ElemT, typename DetT>
+  void OneDiffCorrelation(const DetT & DetI,
 			  const ElemT WeightI,
 			  const ElemT WeightJ,
 			  const size_t bit_length,
@@ -197,8 +197,8 @@ namespace sbd {
   /**
      Function for adding two-occupation different contribution
    */
-  template <typename ElemT>
-  void TwoDiffCorrelation(const std::vector<size_t> & DetI,
+  template <typename ElemT, typename DetT>
+  void TwoDiffCorrelation(const DetT & DetI,
 			  const ElemT WeightI,
 			  const ElemT WeightJ,
 			  const size_t bit_length,
