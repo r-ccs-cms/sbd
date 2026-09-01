@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <stdexcept>
 #include <vector>
 #ifdef _OPENMP
 #include <omp.h>
@@ -19,7 +20,7 @@ inline int omp_get_num_threads() { return 1; }
 namespace sbd {
 
   template<typename DetsContainer>
-  void append_candidates_unique(
+  void append_sorted_candidates_unique(
     DetsContainer& dets,
     DetsContainer& candidates) {
 
@@ -27,52 +28,267 @@ namespace sbd {
       return;
     }
 
-    sort_unique_local_bitarray(candidates);
-
     if (dets.empty()) {
       dets = std::move(candidates);
       return;
     }
 
-    sort_unique_local_bitarray(dets);
-
     auto comp = [](const auto& a, const auto& b) {
       return less_from_back(a, b);
     };
     DetsContainer merged;
-    merged.reserve(dets.size() + candidates.size());
-    std::merge(
+    merged.resize(dets.size() + candidates.size());
+    const auto merged_end = std::set_union(
         std::make_move_iterator(dets.begin()),
         std::make_move_iterator(dets.end()),
         std::make_move_iterator(candidates.begin()),
         std::make_move_iterator(candidates.end()),
-        std::back_inserter(merged),
+        merged.begin(),
         comp);
-    merged.resize(std::unique(merged.begin(), merged.end()) - merged.begin());
+    merged.resize(merged_end - merged.begin());
     dets = std::move(merged);
   }
 
-  void append_candidates_unique(
-    std::vector<std::vector<size_t>>& dets,
-    std::vector<std::vector<std::vector<size_t>>>& candidates_per_thread) {
-
-    std::vector<std::vector<size_t>> candidates_all;
-    size_t total_size = 0;
-    for (const auto& cand : candidates_per_thread) {
-      total_size += cand.size();
-    }
-    candidates_all.reserve(total_size);
-    for (auto& cand : candidates_per_thread) {
-      candidates_all.insert(
-          candidates_all.end(),
-          std::make_move_iterator(cand.begin()),
-          std::make_move_iterator(cand.end()));
-      cand.clear();
-    }
-    append_candidates_unique(dets, candidates_all);
-  }
-
   namespace gdb {
+
+    namespace detail {
+
+      template <typename RealT>
+      struct IntegralDoubleExcitation {
+        int created_first;
+        int created_second;
+        RealT abs_integral;
+      };
+
+      template <typename ElemT, typename RealT>
+      class IntegralDoubleExcitationLookup {
+      public:
+        using entry_type = IntegralDoubleExcitation<RealT>;
+        using const_iterator = typename std::vector<entry_type>::const_iterator;
+
+        IntegralDoubleExcitationLookup(size_t norb,
+                                       const twoInt<ElemT> & I2,
+                                       RealT cutoff,
+                                       RealT max_abs_coefficient)
+          : norb_(norb) {
+          if( norb_ == 0 ) {
+            throw std::invalid_argument("number of orbitals must be positive");
+          }
+          if( cutoff < RealT(0) ) {
+            throw std::invalid_argument("heatbath cutoff must be non-negative");
+          }
+
+          const size_t nso = 2 * norb_;
+          const size_t num_pairs = nso * (nso - 1) / 2;
+          pair_offsets_.assign(num_pairs + 1, 0);
+          if( max_abs_coefficient == RealT(0) ) return;
+
+          for(size_t j=1; j < nso; ++j) {
+            for(size_t i=0; i < j; ++i) {
+              size_t count = 0;
+              for(size_t b=1; b < nso; ++b) {
+                for(size_t a=0; a < b; ++a) {
+                  if( a == i || a == j || b == i || b == j ) continue;
+                  const RealT abs_integral = std::abs(
+                    I2.Value(static_cast<int>(a),static_cast<int>(i),
+                             static_cast<int>(b),static_cast<int>(j))
+                    - I2.Value(static_cast<int>(a),static_cast<int>(j),
+                               static_cast<int>(b),static_cast<int>(i)));
+                  if( abs_integral * max_abs_coefficient > cutoff ) ++count;
+                }
+              }
+              const size_t pair = pair_index(i,j);
+              pair_offsets_[pair+1] = count;
+            }
+          }
+          for(size_t pair=0; pair < num_pairs; ++pair) {
+            pair_offsets_[pair+1] += pair_offsets_[pair];
+          }
+
+          entries_.resize(pair_offsets_.back());
+          for(size_t j=1; j < nso; ++j) {
+            for(size_t i=0; i < j; ++i) {
+              const size_t pair = pair_index(i,j);
+              size_t position = pair_offsets_[pair];
+              for(size_t b=1; b < nso; ++b) {
+                for(size_t a=0; a < b; ++a) {
+                  if( a == i || a == j || b == i || b == j ) continue;
+                  const RealT abs_integral = std::abs(
+                    I2.Value(static_cast<int>(a),static_cast<int>(i),
+                             static_cast<int>(b),static_cast<int>(j))
+                    - I2.Value(static_cast<int>(a),static_cast<int>(j),
+                               static_cast<int>(b),static_cast<int>(i)));
+                  if( abs_integral * max_abs_coefficient > cutoff ) {
+                    entries_[position++] = {
+                      static_cast<int>(a),static_cast<int>(b),abs_integral};
+                  }
+                }
+              }
+              std::sort(entries_.begin() + pair_offsets_[pair],
+                        entries_.begin() + pair_offsets_[pair+1],
+                        [](const entry_type & lhs, const entry_type & rhs) {
+                          return lhs.abs_integral > rhs.abs_integral;
+                        });
+            }
+          }
+        }
+
+        const_iterator begin(int first, int second) const {
+          const size_t pair = checked_pair_index(first,second);
+          return entries_.begin() + pair_offsets_[pair];
+        }
+
+        const_iterator end(int first, int second) const {
+          const size_t pair = checked_pair_index(first,second);
+          return entries_.begin() + pair_offsets_[pair+1];
+        }
+
+        size_t entry_count() const noexcept { return entries_.size(); }
+        size_t storage_bytes() const noexcept {
+          return pair_offsets_.size() * sizeof(size_t)
+            + entries_.size() * sizeof(entry_type);
+        }
+
+      private:
+        static size_t pair_index(size_t first, size_t second) noexcept {
+          return second * (second - 1) / 2 + first;
+        }
+
+        size_t checked_pair_index(int first, int second) const {
+          const int nso = static_cast<int>(2*norb_);
+          if( first < 0 || second < 0 || first == second
+              || first >= nso || second >= nso ) {
+            throw std::out_of_range("invalid annihilation pair");
+          }
+          if( first > second ) std::swap(first,second);
+          return pair_index(static_cast<size_t>(first),
+                            static_cast<size_t>(second));
+        }
+
+        size_t norb_;
+        std::vector<size_t> pair_offsets_;
+        std::vector<entry_type> entries_;
+      };
+
+      template <typename ElemT, typename RealT>
+      void local_heatbath_expansion_integral(
+          const sbd::det_vector<size_t> & det,
+          const std::vector<ElemT> & w,
+          size_t bit_length,
+          size_t norb,
+          const oneInt<ElemT> & I1,
+          const twoInt<ElemT> & I2,
+          RealT cutoff,
+          size_t max_batch_size,
+          sbd::det_vector<size_t> & edet) {
+        if( det.size() != w.size() ) {
+          throw std::invalid_argument(
+            "determinant and coefficient counts must match");
+        }
+        if( cutoff < RealT(0) ) {
+          throw std::invalid_argument("heatbath cutoff must be non-negative");
+        }
+        edet = det;
+        sort_unique_local_bitarray(edet);
+        if( det.empty() ) return;
+
+        RealT max_abs_coefficient = RealT(0);
+        for(const auto & coefficient : w) {
+          max_abs_coefficient = std::max(max_abs_coefficient,
+                                         std::abs(coefficient));
+        }
+        IntegralDoubleExcitationLookup<ElemT,RealT> lookup(
+          norb,I2,cutoff,max_abs_coefficient);
+
+        constexpr size_t automatic_batch_size = 1000000;
+        const size_t aggregate_batch_size = (max_batch_size == 0)
+          ? automatic_batch_size : max_batch_size;
+        const size_t nso = 2*norb;
+
+#pragma omp parallel
+        {
+          const size_t num_threads =
+            static_cast<size_t>(omp_get_num_threads());
+          const size_t local_batch_size =
+            std::max<size_t>(1,aggregate_batch_size/num_threads);
+          sbd::det_vector<size_t> candidates;
+          candidates.resize(local_batch_size);
+          size_t candidate_count = 0;
+          std::vector<size_t> candidate(det[0].begin(), det[0].end());
+          std::vector<int> occupied(nso);
+          std::vector<int> unoccupied(nso);
+
+          auto flush_candidates = [&]() {
+            if( candidate_count == 0 ) return;
+            candidates.resize(candidate_count);
+            sort_unique_local_bitarray(candidates);
+#pragma omp critical(sbd_gdb_heatbath_append_candidates)
+            { append_sorted_candidates_unique(edet,candidates); }
+            candidates.resize(local_batch_size);
+            candidate_count = 0;
+          };
+          auto store_candidate = [&]() {
+            candidates[candidate_count++] = candidate;
+            if( candidate_count == local_batch_size ) flush_candidates();
+          };
+
+#pragma omp for schedule(static)
+          for(size_t idet=0; idet < det.size(); ++idet) {
+            const RealT abs_coefficient = std::abs(w[idet]);
+            if( abs_coefficient == RealT(0) ) continue;
+            size_t occupied_count = 0;
+            size_t unoccupied_count = 0;
+            for(size_t orbital=0; orbital < nso; ++orbital) {
+              if( getocc(det[idet],bit_length,static_cast<int>(orbital)) ) {
+                occupied[occupied_count++] = static_cast<int>(orbital);
+              } else {
+                unoccupied[unoccupied_count++] = static_cast<int>(orbital);
+              }
+            }
+
+            for(size_t oi=0; oi < occupied_count; ++oi) {
+              int annihilated = occupied[oi];
+              for(size_t ua=0; ua < unoccupied_count; ++ua) {
+                int created = unoccupied[ua];
+                if( (annihilated % 2) != (created % 2) ) continue;
+                const ElemT hij = OneExcite(det[idet],bit_length,
+                                            annihilated,created,I1,I2);
+                if( std::abs(hij) * abs_coefficient > cutoff ) {
+                  assign_det(candidate, det[idet]);
+                  setocc(candidate,bit_length,annihilated,false);
+                  setocc(candidate,bit_length,created,true);
+                  store_candidate();
+                }
+              }
+            }
+
+            for(size_t oi=0; oi < occupied_count; ++oi) {
+              for(size_t oj=oi+1; oj < occupied_count; ++oj) {
+                const int first = occupied[oi];
+                const int second = occupied[oj];
+                const auto entries_begin = lookup.begin(first,second);
+                const auto entries_end = lookup.end(first,second);
+                for(auto entry=entries_begin; entry != entries_end; ++entry) {
+                  if( entry->abs_integral * abs_coefficient <= cutoff ) break;
+                  if( getocc(det[idet],bit_length,entry->created_first)
+                      || getocc(det[idet],bit_length,entry->created_second) ) {
+                    continue;
+                  }
+                  assign_det(candidate, det[idet]);
+                  setocc(candidate,bit_length,first,false);
+                  setocc(candidate,bit_length,second,false);
+                  setocc(candidate,bit_length,entry->created_first,true);
+                  setocc(candidate,bit_length,entry->created_second,true);
+                  store_candidate();
+                }
+              }
+            }
+          }
+          flush_candidates();
+        }
+      }
+
+    } // end namespace detail
 
     template<typename HDetT>
     void singles_from_hdet(const HDetT& hdet,
@@ -233,6 +449,9 @@ namespace sbd {
 					 size_t max_batch_size,
 					 sbd::det_vector<size_t> & edet) {
 
+      edet.clear();
+      if( det.empty() ) return;
+
       DetIndexMap idxmap;
       makeDetIndexMap(det,adet,bdet,adet_count,bdet_count,
 		      bit_length,norb,idxmap);
@@ -252,12 +471,6 @@ namespace sbd {
 			 bdet_single,borb_single,
 			 bdet_double,borb_double);
 
-      size_t num_threads = 1;
-#pragma omp parallel
-      {
-	num_threads = omp_get_num_threads();
-      }
-
       size_t num_one_a = static_cast<size_t>(bitcount(adet[0],bit_length,norb));
       size_t num_one_b = static_cast<size_t>(bitcount(bdet[0],bit_length,norb));
       size_t num_ex_single_a = (norb - num_one_a) * num_one_a;
@@ -276,10 +489,8 @@ namespace sbd {
       const size_t effective_max_batch_size =
           (max_batch_size == 0) ? det.size() * max_candidates_per_det
                                 : max_batch_size;
-      const size_t local_batch_size =
-          std::max<size_t>(1, effective_max_batch_size / num_threads);
-
       edet = det;
+      sort_unique_local_bitarray(edet);
 
       // Flatten the ragged (ia, ib) space using prefix sums of AdetToDetLen.
       // Each OpenMP thread owns a contiguous range in this flattened space.
@@ -298,6 +509,8 @@ namespace sbd {
 	thread_id = omp_get_thread_num();
 	num_threads_in_parallel = omp_get_num_threads();
 #endif
+	const size_t local_batch_size =
+	  std::max<size_t>(1, effective_max_batch_size / num_threads_in_parallel);
 
 	const size_t pair_begin = num_adet_det_pairs * thread_id / num_threads_in_parallel;
 	const size_t pair_end   = num_adet_det_pairs * (thread_id + 1) / num_threads_in_parallel;
@@ -309,9 +522,10 @@ namespace sbd {
 	  if (candidates.empty()) {
 	    return;
 	  }
+	  sort_unique_local_bitarray(candidates);
 #pragma omp critical(sbd_gdb_heatbath_append_candidates)
 	  {
-	    append_candidates_unique(edet, candidates);
+	    append_sorted_candidates_unique(edet, candidates);
 	  }
 	  candidates.clear();
 	  candidates.reserve(local_batch_size);
@@ -441,7 +655,8 @@ namespace sbd {
 				  size_t max_batch_size,
 				  sbd::det_vector<size_t> & edet) {
 
-      if( det.size() == static_cast<size_t>(0) ) return;
+      edet.clear();
+      if( det.empty() ) return;
 
       sbd::det_vector<size_t, sbd::det_kind::half> adet;
       sbd::det_vector<size_t, sbd::det_kind::half> bdet;
@@ -451,12 +666,6 @@ namespace sbd {
       DetIndexMap idxmap;
       makeDetIndexMap(det,adet,bdet,adet_count,bdet_count,bit_length,norb,idxmap);
 
-      size_t num_threads = 1;
-#pragma omp parallel
-      {
-	num_threads = omp_get_num_threads();
-      }
-      
       size_t num_one_a = static_cast<size_t>(bitcount(adet[0],bit_length,norb));
       size_t num_one_b = static_cast<size_t>(bitcount(bdet[0],bit_length,norb));
       size_t num_ex_single_a = (norb - num_one_a) * num_one_a;
@@ -475,9 +684,8 @@ namespace sbd {
       const size_t effective_max_batch_size =
           (max_batch_size == 0) ? det.size() * max_candidates_per_det
                                 : max_batch_size;
-      const size_t local_batch_size =
-          std::max<size_t>(1, effective_max_batch_size / num_threads);
       edet = det;
+      sort_unique_local_bitarray(edet);
       std::vector<size_t> adet_to_det_offset(idxmap.AdetToDetLen.size() + 1, 0);
       for(size_t ia = 0; ia < idxmap.AdetToDetLen.size(); ++ia) {
 	adet_to_det_offset[ia + 1] = adet_to_det_offset[ia] + idxmap.AdetToDetLen[ia];
@@ -493,6 +701,8 @@ namespace sbd {
 	thread_id = omp_get_thread_num();
 	num_threads_in_parallel = omp_get_num_threads();
 #endif
+	const size_t local_batch_size =
+	  std::max<size_t>(1, effective_max_batch_size / num_threads_in_parallel);
 
 	const size_t pair_begin = num_adet_det_pairs * thread_id / num_threads_in_parallel;
 	const size_t pair_end   = num_adet_det_pairs * (thread_id + 1) / num_threads_in_parallel;
@@ -504,9 +714,10 @@ namespace sbd {
 	  if (candidates.empty()) {
 	    return;
 	  }
+	  sort_unique_local_bitarray(candidates);
 #pragma omp critical(sbd_gdb_heatbath_append_candidates)
 	  {
-	    append_candidates_unique(edet, candidates);
+	    append_sorted_candidates_unique(edet, candidates);
 	  }
 	  candidates.clear();
 	  candidates.reserve(local_batch_size);
@@ -689,6 +900,14 @@ namespace sbd {
 			   MPI_Comm b_comm,
 			   MPI_Comm comm) {
 
+      if( det.size() != w.size() ) {
+	throw std::invalid_argument(
+	  "determinant and coefficient counts must match");
+      }
+      if( type != 0 && type != 1 ) {
+	throw std::invalid_argument("heatbath method must be 0 or 1");
+      }
+
       int mpi_rank; MPI_Comm_rank(comm,&mpi_rank);
       int mpi_size; MPI_Comm_size(comm,&mpi_size);
       int mpi_rank_b; MPI_Comm_rank(b_comm,&mpi_rank_b);
@@ -704,19 +923,14 @@ namespace sbd {
       get_mpi_range(mpi_size_x,mpi_rank_x,i_begin,i_end);
 
       sbd::det_vector<size_t> xdet(det.begin() + i_begin, det.begin() + i_end);
+      std::vector<ElemT> xw(w.begin() + i_begin, w.begin() + i_end);
       edet.clear();
 
       if( type == 0 ) {
-	local_heatbath_expansion(xdet,w,bit_length,norb,I0,I1,I2,cutoff,max_batch_size,edet);
+	local_heatbath_expansion(xdet,xw,bit_length,norb,I0,I1,I2,cutoff,max_batch_size,edet);
       } else if( type == 1 ) {
-	sbd::det_vector<size_t, sbd::det_kind::half> adet;
-	sbd::det_vector<size_t, sbd::det_kind::half> bdet;
-	std::vector<size_t> adet_count;
-	std::vector<size_t> bdet_count;
-	getHalfDets(xdet,bit_length,norb,
-		    adet,bdet,adet_count,bdet_count);
-	local_heatbath_expansion_lookup(xdet,adet,bdet,adet_count,bdet_count,w,
-					bit_length,norb,I0,I1,I2,cutoff,max_batch_size,edet);
+	detail::local_heatbath_expansion_integral(
+	  xdet,xw,bit_length,norb,I1,I2,cutoff,max_batch_size,edet);
       }
       
       sort_global_bitarray(edet,comm);

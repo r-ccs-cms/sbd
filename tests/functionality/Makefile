@@ -82,6 +82,11 @@ test: $(TEST_EXECS)
 		echo ""; \
 		echo "Running $$test..."; \
 		case $$test in \
+			test_heatbath_expansion) \
+				echo "  (MPI regression - h and t replicated layouts)"; \
+				$(MPI_LAUNCHER) -n 4 ./$$test ../../data/h2o/fcidump.txt h && \
+				$(MPI_LAUNCHER) -n 4 ./$$test ../../data/h2o/fcidump.txt t; \
+				;; \
 			test_determinants|test_inner_product) \
 				echo "  (MPI test - using $(MPI_LAUNCHER))"; \
 				$(MPI_LAUNCHER) -n 1 ./$$test; \

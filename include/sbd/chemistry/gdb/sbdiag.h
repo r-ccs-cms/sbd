@@ -27,7 +27,7 @@ namespace sbd {
       double threshold = 0.01;
       double heatbath_cutoff = 1.0e-4;
       double heatbath_truncation = 0.0;
-      size_t heatbath_batch_size = 200000000;
+      size_t heatbath_batch_size = 1000000;
       size_t bit_length = 20;
       size_t seed = 1729;
       bool timing_barriers = false;
@@ -138,10 +138,16 @@ namespace sbd {
       } else  if( sbd_data.carryover_type == 1 ) {
 	std::cout << "# carryover type: weight truncation" << std::endl;
 	std::cout << "# carryover ratio: " << sbd_data.ratio << std::endl;
-      } else if ( sbd_data.carryover_type == 2 || sbd_data.carryover_type == 3 ) {
-	std::cout << "# carryover type: heatbath expansion" << std::endl;
+      } else if ( sbd_data.carryover_type == 2 ) {
+	std::cout << "# carryover type: on-demand exhaustive heatbath expansion" << std::endl;
 	std::cout << "# heatbath truncation: " << sbd_data.heatbath_truncation << std::endl;
 	std::cout << "# heatbath cutoff: " << sbd_data.heatbath_cutoff << std::endl;
+	std::cout << "# heatbath batch size per rank: " << sbd_data.heatbath_batch_size << std::endl;
+      } else if ( sbd_data.carryover_type == 3 ) {
+	std::cout << "# carryover type: integral-driven heatbath expansion" << std::endl;
+	std::cout << "# heatbath truncation: " << sbd_data.heatbath_truncation << std::endl;
+	std::cout << "# heatbath cutoff: " << sbd_data.heatbath_cutoff << std::endl;
+	std::cout << "# heatbath batch size per rank: " << sbd_data.heatbath_batch_size << std::endl;
       }
     }
 
@@ -587,9 +593,9 @@ namespace sbd {
 		    << " sbd: start heatbath expansion" << std::endl;
 	}
 	auto time_start_hb = std::chrono::high_resolution_clock::now();
-	int hb_type = (co_type == 2) ? 0 : 1;
+	int heatbath_method = (co_type == 2) ? 0 : 1;
 	HeatbathExpansion(cdet,cw,bit_length,static_cast<size_t>(L),I0,I1,I2,
-			  hb_type,hb_cutoff,hb_batch_size,rdet,b_comm,comm);
+			  heatbath_method,hb_cutoff,hb_batch_size,rdet,b_comm,comm);
 	auto time_end_hb = std::chrono::high_resolution_clock::now();
 	auto elapsed_hb_count = std::chrono::duration_cast<std::chrono::microseconds>(time_end_hb-time_start_hb).count();
 	double elapsed_hb = 1.0e-6 * elapsed_hb_count;
