@@ -4,6 +4,5 @@ mpirun -np 16 -x OMP_NUM_THREADS=1 ./diag --fcidump fcidump_Fe4S4.txt \
        --method 0 --block 10 --iteration 4 --tolerance 1.0e-4 \
        --b_comm_size 2 --t_comm_size 1 \
        --init 0 --shuffle 0 \
-       --carryoverfile carryover.txt \
-       --rdm 1 --carryover_ratio 0.1
-
+       --carryovername carryover.txt \
+       --rdm 1 --carryover_type 1 --carryover_ratio 0.1

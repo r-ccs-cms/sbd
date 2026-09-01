@@ -38,48 +38,15 @@ namespace sbd {
     };
     DetsContainer merged;
     merged.resize(dets.size() + candidates.size());
-    std::merge(
+    const auto merged_end = std::set_union(
         std::make_move_iterator(dets.begin()),
         std::make_move_iterator(dets.end()),
         std::make_move_iterator(candidates.begin()),
         std::make_move_iterator(candidates.end()),
         merged.begin(),
         comp);
-    merged.resize(std::unique(merged.begin(), merged.end()) - merged.begin());
+    merged.resize(merged_end - merged.begin());
     dets = std::move(merged);
-  }
-
-  template<typename DetsContainer>
-  void append_candidates_unique(
-    DetsContainer& dets,
-    DetsContainer& candidates) {
-
-    if (candidates.empty()) {
-      return;
-    }
-    sort_unique_local_bitarray(candidates);
-    sort_unique_local_bitarray(dets);
-    append_sorted_candidates_unique(dets,candidates);
-  }
-
-  void append_candidates_unique(
-    std::vector<std::vector<size_t>>& dets,
-    std::vector<std::vector<std::vector<size_t>>>& candidates_per_thread) {
-
-    std::vector<std::vector<size_t>> candidates_all;
-    size_t total_size = 0;
-    for (const auto& cand : candidates_per_thread) {
-      total_size += cand.size();
-    }
-    candidates_all.reserve(total_size);
-    for (auto& cand : candidates_per_thread) {
-      candidates_all.insert(
-          candidates_all.end(),
-          std::make_move_iterator(cand.begin()),
-          std::make_move_iterator(cand.end()));
-      cand.clear();
-    }
-    append_candidates_unique(dets, candidates_all);
   }
 
   namespace gdb {

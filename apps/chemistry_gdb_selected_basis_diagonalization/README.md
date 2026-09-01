@@ -68,14 +68,26 @@ Below is an explanation of each command-line option.
   The maximum size of the subspace used in the Davidson method.
 - `--tolerance <float>`:  
   Convergence threshold for the Davidson method. It determines the stopping criterion based on the norm of the residual vector.
+- `--carryover_type <int>`:
+  Selects how determinants are retained or expanded after diagonalization (default: 0).
+  - 0: Do not generate carryover determinants.
+  - 1: Retain determinants by wavefunction weight.
+  - 2: Apply on-demand exhaustive heatbath expansion.
+  - 3: Apply integral-driven heatbath expansion.
 - `--carryover_ratio <float>`:  
-  The ratio of bitstrings with large wavefunction weights to be retained during the selection step.
+  For `--carryover_type 1`, specifies the ratio of determinants with the largest wavefunction weights to retain.
+- `--heatbath_cutoff <float>`:
+  For `--carryover_type 2` or `3`, specifies the heatbath selection cutoff (default: `1.0e-4`).
+- `--heatbath_truncation <float>`:
+  For `--carryover_type 2` or `3`, specifies the wavefunction-weight truncation applied before expansion (default: `0.0`).
+- `--heatbath_batch_size <int>`:
+  For `--carryover_type 2` or `3`, specifies the aggregate candidate batch size per MPI rank (default: `1000000`).
 - `--shuffle <int>`:  
   Whether to shuffle the order of input half-determinants. If set to 0, no shuffling is performed; otherwise, the input is shuffled.
 - `--rdm <int>`:  
   Whether to compute the 1-particle and 2-particle reduced density matrices (1pRDM and 2pRDM). If set to 0, they are not computed; otherwise, they are computed.
 - `--carryovername <str>`:
-  Specifies the filename to store the carryover determinants.
+  Specifies the filename prefix used to store the carryover determinants.
 - `--bit_length <int>`:  
   Specifies the bit length handled by each size_t when representing bitstrings using `std::vector<size_t>`. The default value is 20.
 - `--do_redist_alpha_eq <int>`:
