@@ -221,8 +221,12 @@ inline std::vector<int> cyclic_blocks_for_local_unique_keys(
   }
 
   std::vector<int> reply_recv_counts(static_cast<size_t>(mpi_size), 0);
-  MPI_Alltoall(reply_send_counts.data(), 1, MPI_INT,
-               reply_recv_counts.data(), 1, MPI_INT, comm);
+  for (int dest = 0; dest < mpi_size; ++dest) {
+    const int n_records = send_counts[static_cast<size_t>(dest)] /
+                          static_cast<int>(query_record_words);
+    reply_recv_counts[static_cast<size_t>(dest)] =
+        n_records * static_cast<int>(reply_record_words);
+  }
 
   std::vector<int> reply_send_displs(static_cast<size_t>(mpi_size), 0);
   std::vector<int> reply_recv_displs(static_cast<size_t>(mpi_size), 0);
