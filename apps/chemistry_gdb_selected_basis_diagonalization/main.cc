@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -17,6 +18,54 @@ using Elem = std::complex<double>;
 #else
 using Elem = double;
 #endif
+
+namespace {
+
+enum class DeterminantDistribution {
+  input,
+  equal_bra_a,
+  count,
+  count_sorted,
+  grid_cyclic_balanced
+};
+
+DeterminantDistribution resolve_determinant_distribution(
+    const sbd::gdb::SBD & sbd_data) {
+  std::string name = sbd_data.determinant_distribution;
+  std::replace(name.begin(), name.end(), '_', '-');
+  if( name == "input" ) return DeterminantDistribution::input;
+  if( name == "equal-bra-a" ) return DeterminantDistribution::equal_bra_a;
+  if( name == "count" ) return DeterminantDistribution::count;
+  if( name == "count-sorted" ) return DeterminantDistribution::count_sorted;
+  if( name == "grid-cyclic-balanced" ) {
+    return DeterminantDistribution::grid_cyclic_balanced;
+  }
+  if( !name.empty() ) {
+    throw std::invalid_argument("unknown determinant distribution: " + name);
+  }
+
+  if( sbd_data.do_redist_alpha_eq ) {
+    return DeterminantDistribution::equal_bra_a;
+  }
+  if( sbd_data.do_sort_det ) return DeterminantDistribution::count_sorted;
+  if( sbd_data.do_redist_det ) return DeterminantDistribution::count;
+  return DeterminantDistribution::input;
+}
+
+const char * determinant_distribution_name(
+    const DeterminantDistribution distribution) {
+  switch(distribution) {
+    case DeterminantDistribution::input: return "input";
+    case DeterminantDistribution::equal_bra_a: return "equal-bra-a";
+    case DeterminantDistribution::count: return "count";
+    case DeterminantDistribution::count_sorted: return "count-sorted";
+    case DeterminantDistribution::grid_cyclic_balanced:
+      return "grid-cyclic-balanced";
+  }
+  return "unknown";
+}
+
+} // namespace
 
 int main(int argc, char * argv[]) {
 
@@ -147,13 +196,12 @@ int main(int argc, char * argv[]) {
   int mpi_size_t; MPI_Comm_size(t_comm,&mpi_size_t);
   int mpi_rank_t; MPI_Comm_rank(t_comm,&mpi_rank_t);
 
+  const DeterminantDistribution determinant_distribution =
+      resolve_determinant_distribution(sbd_data);
   int determinant_grid_a = sbd_data.determinant_grid_a;
   int determinant_grid_b = sbd_data.determinant_grid_b;
-  if( !sbd_data.determinant_distribution.empty() ) {
-    if( sbd_data.determinant_distribution != "grid-cyclic-balanced" &&
-        sbd_data.determinant_distribution != "grid_cyclic_balanced" ) {
-      throw std::invalid_argument("unknown determinant distribution");
-    }
+  if( determinant_distribution ==
+      DeterminantDistribution::grid_cyclic_balanced ) {
     if( (determinant_grid_a == 0) != (determinant_grid_b == 0) ) {
       throw std::invalid_argument(
           "specify both determinant grid dimensions or neither");
@@ -168,24 +216,41 @@ int main(int argc, char * argv[]) {
       throw std::invalid_argument(
           "determinant grid dimensions must multiply to b_comm_size");
     }
+  } else if( determinant_grid_a != 0 || determinant_grid_b != 0 ) {
+    throw std::invalid_argument(
+        "determinant grid dimensions require grid-cyclic-balanced distribution");
+  }
+  if( mpi_rank == 0 ) {
+    std::cout << "# effective determinant distribution: "
+              << determinant_distribution_name(determinant_distribution)
+              << std::endl;
+    if( determinant_distribution ==
+        DeterminantDistribution::grid_cyclic_balanced ) {
+      std::cout << "# determinant grid: " << determinant_grid_a << " x "
+                << determinant_grid_b << std::endl;
+    }
   }
   if( mpi_rank_h == 0 ) {
     if( mpi_rank_t == 0 ) {
       sbd::load_basis_from_files(detfiles,det,bit_length,2*L,b_comm);
       sbd::sort_bitarray(det);
-      if( !sbd_data.determinant_distribution.empty() ) {
+      if( determinant_distribution ==
+          DeterminantDistribution::grid_cyclic_balanced ) {
 	sbd::gdb::redistribution_grid_bra_ab_cyclic(
 	    det,bit_length,2*static_cast<size_t>(L),
 	    static_cast<size_t>(determinant_grid_a),
 	    static_cast<size_t>(determinant_grid_b),b_comm);
 	sbd::redistribution_bitarray(det,b_comm);
 	sbd::sort_bitarray(det);
-      } else if( sbd_data.do_redist_alpha_eq ) {
+      } else if( determinant_distribution ==
+                 DeterminantDistribution::equal_bra_a ) {
 	sbd::redistribution_equal_bra_a(det,bit_length,2*L,b_comm);
-      } else if( sbd_data.do_sort_det ) {
+      } else if( determinant_distribution ==
+                 DeterminantDistribution::count_sorted ) {
 	sbd::redistribution(det,bit_length,2*L,b_comm);
 	sbd::reordering(det,bit_length,2*L,b_comm);
-      } else if ( sbd_data.do_redist_det ) {
+      } else if( determinant_distribution ==
+                 DeterminantDistribution::count ) {
 	sbd::redistribution(det,bit_length,2*L,b_comm);
       }
     }

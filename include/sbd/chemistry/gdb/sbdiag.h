@@ -151,10 +151,6 @@ namespace sbd {
       std::cout << "# do basis sort: " << sbd_data.do_sort_det << std::endl;
       std::cout << "# do redistribution of basis: " << sbd_data.do_redist_det << std::endl;
       std::cout << "# do equal-bra_a redistribution: " << sbd_data.do_redist_alpha_eq << std::endl;
-      if( !sbd_data.determinant_distribution.empty() ) {
-	std::cout << "# determinant distribution: "
-	          << sbd_data.determinant_distribution << std::endl;
-      }
       if( sbd_data.do_rdm != 0.0 ) {
 	std::cout << "# do rdm: " << sbd_data.do_rdm << std::endl;
       }

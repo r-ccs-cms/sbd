@@ -107,11 +107,19 @@ Below is an explanation of each command-line option.
 - `--do_sort_det <int>`:
   If non-zero, redistribute determinants as with `--do_redist_det` and then reorder them within each rank.
   Used only when `--do_redist_alpha_eq 0` is explicitly passed; takes priority over `--do_redist_det`.
-- `--determinant_distribution grid-cyclic-balanced`:
-  Assign determinants through a cyclic alpha/beta key grid, rebalance the
-  resulting rank-local sequences by determinant count, and restore local
-  determinant ordering. This explicit option takes priority over the legacy
-  redistribution flags. The grid dimensions default to the factor pair of
-  `b_comm_size` closest to a square.
+- `--determinant_distribution <str>`:
+  Select the GDB determinant placement. An explicit value takes priority over
+  the legacy redistribution flags. Supported values are:
+  - `input`: preserve the rank placement established by the sorted input
+    shards; no post-load redistribution is performed.
+  - `equal-bra-a`: use the existing equal-alpha-bra redistribution. This is
+    the effective default when neither this option nor legacy overrides are
+    specified.
+  - `count`: redistribute by determinant count.
+  - `count-sorted`: redistribute by count and reorder within each rank.
+  - `grid-cyclic-balanced`: assign through a cyclic alpha/beta key grid,
+    redistribute by determinant count, and sort within each rank. The grid
+    dimensions default to the factor pair of `b_comm_size` closest to a square.
 - `--determinant_grid_a <int>`, `--determinant_grid_b <int>`:
-  Override both grid dimensions. Their product must equal `b_comm_size`.
+  Override both grid dimensions for `grid-cyclic-balanced`. Their product must
+  equal `b_comm_size`; both must be specified together.
