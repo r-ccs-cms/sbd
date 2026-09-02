@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <cstring>
 #include <numeric>
 #include <stdexcept>
 #include <vector>
@@ -332,11 +333,11 @@ inline void alltoallv_determinants(sbd::det_vector<size_t>& config,
   std::vector<int> current_displs = send_displs_words;
   for (size_t i = 0; i < config.size(); ++i) {
     const int dest = dest_per_det[i];
-    int pos = current_displs[static_cast<size_t>(dest)];
-    for (size_t k = 0; k < num_words; ++k) {
-      sendbuf[static_cast<size_t>(pos++)] = config[i][k];
-    }
-    current_displs[static_cast<size_t>(dest)] = pos;
+    const int pos = current_displs[static_cast<size_t>(dest)];
+    std::memcpy(sendbuf.data() + pos, config[i].data(),
+                num_words * sizeof(size_t));
+    current_displs[static_cast<size_t>(dest)] +=
+        static_cast<int>(num_words);
   }
 
   MPI_Alltoallv(sendbuf.data(), send_counts_words.data(), send_displs_words.data(), SBD_MPI_SIZE_T,
@@ -344,11 +345,11 @@ inline void alltoallv_determinants(sbd::det_vector<size_t>& config,
                 comm);
 
   const size_t recv_n = static_cast<size_t>(total_recv_words) / num_words;
-  config.assign(recv_n, std::vector<size_t>(num_words, 0));
-  for (size_t i = 0; i < recv_n; ++i) {
-    for (size_t k = 0; k < num_words; ++k) {
-      config[i][k] = recvbuf[i * num_words + k];
-    }
+  sbd::det_vector<size_t>::init_elem_size(num_words);
+  config.resize(recv_n);
+  if (!recvbuf.empty()) {
+    std::memcpy(config.flat().data(), recvbuf.data(),
+                recvbuf.size() * sizeof(size_t));
   }
 
 }
