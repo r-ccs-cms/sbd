@@ -193,10 +193,9 @@ inline std::vector<int> cyclic_blocks_for_local_unique_keys(
     const int owner = query_owner[i];
     int pos = fill[static_cast<size_t>(owner)];
     sendbuf[static_cast<size_t>(pos++)] = i;
-    for (size_t k = 0; k < num_words; ++k) {
-      sendbuf[static_cast<size_t>(pos++)] = local_unique_queries[i][k];
-    }
-    fill[static_cast<size_t>(owner)] = pos;
+    std::memcpy(sendbuf.data() + pos, local_unique_queries[i].data(),
+                num_words * sizeof(size_t));
+    fill[static_cast<size_t>(owner)] = pos + static_cast<int>(num_words);
   }
 
   MPI_Alltoallv(sendbuf.data(), send_counts.data(), send_displs.data(), SBD_MPI_SIZE_T,
@@ -239,15 +238,14 @@ inline std::vector<int> cyclic_blocks_for_local_unique_keys(
   std::vector<size_t> reply_recvbuf(static_cast<size_t>(total_reply_recv), 0);
 
   std::vector<int> reply_fill = reply_send_displs;
+  std::vector<size_t> key(num_words, 0);
   for (int src = 0; src < mpi_size; ++src) {
     const int begin = recv_displs[static_cast<size_t>(src)];
     const int end = begin + recv_counts[static_cast<size_t>(src)];
     for (int pos = begin; pos < end; pos += static_cast<int>(query_record_words)) {
       const size_t query_id = recvbuf[static_cast<size_t>(pos)];
-      std::vector<size_t> key(num_words, 0);
-      for (size_t k = 0; k < num_words; ++k) {
-        key[k] = recvbuf[static_cast<size_t>(pos) + 1 + k];
-      }
+      std::memcpy(key.data(), recvbuf.data() + pos + 1,
+                  num_words * sizeof(size_t));
 
       auto it = std::lower_bound(global_keys.begin(), global_keys.end(), key,
                                  [](const auto& a, const auto& b) {
