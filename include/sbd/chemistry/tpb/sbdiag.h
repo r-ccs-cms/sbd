@@ -522,7 +522,7 @@ namespace sbd {
 	}
 
 	auto time_start_davidson = std::chrono::high_resolution_clock::now();
-	sbd::BasisInitVector(W,adet,bdet,adet_comm_size,bdet_comm_size,h_comm,b_comm,t_comm,init,seed);
+	// W was initialized or loaded before Hamiltonian construction.
 #ifdef SBD_THRUST
 	if( method == 1 ) {
 		sbd::Davidson(hii, W, device_mult,
