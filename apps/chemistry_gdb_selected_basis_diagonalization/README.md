@@ -99,10 +99,13 @@ Below is an explanation of each command-line option.
 - `--do_redist_alpha_eq <int>`:
   Whether to redistribute determinants across ranks so that each rank owns an equal-sized disjoint range of unique alpha strings (default: 1).
   This alpha-primary partition improves load balance in the Hamiltonian-vector multiply, where work per rank scales with the number of distinct alpha strings it holds.
-  Takes priority over all other redistribution options. Pass 0 to disable; when disabled, the behavior falls back to `--do_sort_det` if set, then `--do_redist_det` if set, otherwise each rank retains the determinants loaded from its input shard files with no further redistribution.
+  Among the legacy flags, this takes priority over the other redistribution
+  options. Pass 0 to disable; when disabled, the behavior falls back to
+  `--do_sort_det` if set, then `--do_redist_det` if set, otherwise the sorted
+  input-shard placement is retained. An explicit `--determinant_distribution`
+  takes priority over all legacy flags.
 - `--do_redist_det <int>`:
-  If non-zero, redistribute determinants across ranks based on MPI file ownership: each rank receives the determinants from the shard files assigned to it.
-  Useful when the input shard files are not already balanced across ranks.
+  If non-zero, redistribute determinants evenly by determinant count.
   Used only when `--do_redist_alpha_eq 0` is explicitly passed and `--do_sort_det` is not set.
 - `--do_sort_det <int>`:
   If non-zero, redistribute determinants as with `--do_redist_det` and then reorder them within each rank.
@@ -123,3 +126,31 @@ Below is an explanation of each command-line option.
 - `--determinant_grid_a <int>`, `--determinant_grid_b <int>`:
   Override both grid dimensions for `grid-cyclic-balanced`. Their product must
   equal `b_comm_size`; both must be specified together.
+
+### Determinant distribution compatibility
+
+If `--determinant_distribution` is present, its string value determines the
+placement and the legacy boolean flags are ignored. If it is absent, the
+existing behavior is preserved:
+
+```text
+do_redist_alpha_eq != 0  -> equal-bra-a
+do_sort_det != 0         -> count-sorted
+do_redist_det != 0       -> count
+otherwise                -> input
+```
+
+Because `do_redist_alpha_eq` defaults to 1, an unchanged existing command uses
+`equal-bra-a`. To select the new grid placement on four basis ranks and let the
+program choose the `2 x 2` grid, use:
+
+```bash
+--b_comm_size 4 \
+--determinant_distribution grid-cyclic-balanced
+```
+
+To choose the dimensions explicitly, add both options:
+
+```bash
+--determinant_grid_a 2 --determinant_grid_b 2
+```
