@@ -107,3 +107,11 @@ Below is an explanation of each command-line option.
 - `--do_sort_det <int>`:
   If non-zero, redistribute determinants as with `--do_redist_det` and then reorder them within each rank.
   Used only when `--do_redist_alpha_eq 0` is explicitly passed; takes priority over `--do_redist_det`.
+- `--determinant_distribution grid-cyclic-balanced`:
+  Assign determinants through a cyclic alpha/beta key grid, rebalance the
+  resulting rank-local sequences by determinant count, and restore local
+  determinant ordering. This explicit option takes priority over the legacy
+  redistribution flags. The grid dimensions default to the factor pair of
+  `b_comm_size` closest to a square.
+- `--determinant_grid_a <int>`, `--determinant_grid_b <int>`:
+  Override both grid dimensions. Their product must equal `b_comm_size`.

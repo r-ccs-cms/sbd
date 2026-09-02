@@ -146,11 +146,41 @@ int main(int argc, char * argv[]) {
   int mpi_rank_b; MPI_Comm_rank(b_comm,&mpi_rank_b);
   int mpi_size_t; MPI_Comm_size(t_comm,&mpi_size_t);
   int mpi_rank_t; MPI_Comm_rank(t_comm,&mpi_rank_t);
+
+  int determinant_grid_a = sbd_data.determinant_grid_a;
+  int determinant_grid_b = sbd_data.determinant_grid_b;
+  if( !sbd_data.determinant_distribution.empty() ) {
+    if( sbd_data.determinant_distribution != "grid-cyclic-balanced" &&
+        sbd_data.determinant_distribution != "grid_cyclic_balanced" ) {
+      throw std::invalid_argument("unknown determinant distribution");
+    }
+    if( (determinant_grid_a == 0) != (determinant_grid_b == 0) ) {
+      throw std::invalid_argument(
+          "specify both determinant grid dimensions or neither");
+    }
+    if( determinant_grid_a == 0 ) {
+      determinant_grid_a = static_cast<int>(std::sqrt(mpi_size_b));
+      while( determinant_grid_a > 1 &&
+             mpi_size_b % determinant_grid_a != 0 ) --determinant_grid_a;
+      determinant_grid_b = mpi_size_b / determinant_grid_a;
+    }
+    if( determinant_grid_a * determinant_grid_b != mpi_size_b ) {
+      throw std::invalid_argument(
+          "determinant grid dimensions must multiply to b_comm_size");
+    }
+  }
   if( mpi_rank_h == 0 ) {
     if( mpi_rank_t == 0 ) {
       sbd::load_basis_from_files(detfiles,det,bit_length,2*L,b_comm);
       sbd::sort_bitarray(det);
-      if( sbd_data.do_redist_alpha_eq ) {
+      if( !sbd_data.determinant_distribution.empty() ) {
+	sbd::gdb::redistribution_grid_bra_ab_cyclic(
+	    det,bit_length,2*static_cast<size_t>(L),
+	    static_cast<size_t>(determinant_grid_a),
+	    static_cast<size_t>(determinant_grid_b),b_comm);
+	sbd::redistribution_bitarray(det,b_comm);
+	sbd::sort_bitarray(det);
+      } else if( sbd_data.do_redist_alpha_eq ) {
 	sbd::redistribution_equal_bra_a(det,bit_length,2*L,b_comm);
       } else if( sbd_data.do_sort_det ) {
 	sbd::redistribution(det,bit_length,2*L,b_comm);

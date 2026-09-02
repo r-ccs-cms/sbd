@@ -36,6 +36,9 @@ namespace sbd {
       bool do_sort_det = false;
       bool do_redist_det = false;
       bool do_redist_alpha_eq = true;
+      std::string determinant_distribution;
+      int determinant_grid_a = 0;
+      int determinant_grid_b = 0;
     };
 
     SBD generate_sbd_data(int argc, char * argv[]) {
@@ -112,6 +115,18 @@ namespace sbd {
 	if( std::string(argv[i]) == "--do_redist_alpha_eq" ) {
 	  sbd_data.do_redist_alpha_eq = ( std::atoi(argv[++i]) != 0 );
 	}
+	if( std::string(argv[i]) == "--determinant_distribution" ||
+	    std::string(argv[i]) == "--determinant-distribution" ) {
+	  sbd_data.determinant_distribution = std::string(argv[++i]);
+	}
+	if( std::string(argv[i]) == "--determinant_grid_a" ||
+	    std::string(argv[i]) == "--determinant-grid-a" ) {
+	  sbd_data.determinant_grid_a = std::atoi(argv[++i]);
+	}
+	if( std::string(argv[i]) == "--determinant_grid_b" ||
+	    std::string(argv[i]) == "--determinant-grid-b" ) {
+	  sbd_data.determinant_grid_b = std::atoi(argv[++i]);
+	}
       }
       return sbd_data;
     }
@@ -136,6 +151,10 @@ namespace sbd {
       std::cout << "# do basis sort: " << sbd_data.do_sort_det << std::endl;
       std::cout << "# do redistribution of basis: " << sbd_data.do_redist_det << std::endl;
       std::cout << "# do equal-bra_a redistribution: " << sbd_data.do_redist_alpha_eq << std::endl;
+      if( !sbd_data.determinant_distribution.empty() ) {
+	std::cout << "# determinant distribution: "
+	          << sbd_data.determinant_distribution << std::endl;
+      }
       if( sbd_data.do_rdm != 0.0 ) {
 	std::cout << "# do rdm: " << sbd_data.do_rdm << std::endl;
       }
