@@ -129,28 +129,25 @@ inline std::vector<int> cyclic_blocks_for_local_unique_keys(
     throw std::runtime_error("cyclic_blocks_for_local_unique_keys: empty global key set.");
   }
 
-  std::vector<size_t> first_local(num_words, 0), last_local(num_words, 0);
+  std::vector<size_t> last_local(num_words, 0);
   if (!global_keys.empty()) {
-    first_local = static_cast<std::vector<size_t>>(global_keys[0]);
-    last_local = static_cast<std::vector<size_t>>(global_keys[global_keys.size() - 1]);
+    std::memcpy(last_local.data(), global_keys[global_keys.size() - 1].data(),
+                num_words * sizeof(size_t));
   }
 
-  std::vector<size_t> first_all(static_cast<size_t>(mpi_size) * num_words, 0);
   std::vector<size_t> last_all(static_cast<size_t>(mpi_size) * num_words, 0);
-  MPI_Allgather(first_local.data(), static_cast<int>(num_words), SBD_MPI_SIZE_T,
-                first_all.data(), static_cast<int>(num_words), SBD_MPI_SIZE_T,
-                comm);
   MPI_Allgather(last_local.data(), static_cast<int>(num_words), SBD_MPI_SIZE_T,
                 last_all.data(), static_cast<int>(num_words), SBD_MPI_SIZE_T,
                 comm);
 
-  auto get_first = [&](int r) {
-    return std::vector<size_t>(first_all.begin() + static_cast<size_t>(r) * num_words,
-                               first_all.begin() + static_cast<size_t>(r + 1) * num_words);
-  };
-  auto get_last = [&](int r) {
-    return std::vector<size_t>(last_all.begin() + static_cast<size_t>(r) * num_words,
-                               last_all.begin() + static_cast<size_t>(r + 1) * num_words);
+  auto last_less_than_key = [&](const int r, const auto& key) {
+    const size_t offset = static_cast<size_t>(r) * num_words;
+    for (size_t k = num_words; k > 0; --k) {
+      const size_t last_word = last_all[offset + k - 1];
+      if (last_word < key[k - 1]) return true;
+      if (last_word > key[k - 1]) return false;
+    }
+    return false;
   };
 
   auto owner_rank = [&](const auto& key) -> int {
@@ -158,12 +155,7 @@ inline std::vector<int> cyclic_blocks_for_local_unique_keys(
     for (int r = 0; r < mpi_size; ++r) {
       if (key_counts[static_cast<size_t>(r)] == 0) continue;
       last_nonempty = r;
-      const std::vector<size_t> first = get_first(r);
-      const std::vector<size_t> last = get_last(r);
-      const bool ge_first = !sbd::less_from_back(key, first);
-      const bool le_last = !sbd::less_from_back(last, key);
-      if (ge_first && le_last) return r;
-      if (sbd::less_from_back(key, first)) return r;
+      if (!last_less_than_key(r, key)) return r;
     }
     return last_nonempty >= 0 ? last_nonempty : 0;
   };
