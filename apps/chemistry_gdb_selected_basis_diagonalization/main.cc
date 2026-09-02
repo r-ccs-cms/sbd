@@ -210,6 +210,10 @@ int main(int argc, char * argv[]) {
       determinant_distribution ==
           DeterminantDistribution::grid_cyclic_balanced;
   if( uses_determinant_grid ) {
+    if( determinant_grid_a < 0 || determinant_grid_b < 0 ) {
+      throw std::invalid_argument(
+          "determinant grid dimensions must be positive");
+    }
     if( (determinant_grid_a == 0) != (determinant_grid_b == 0) ) {
       throw std::invalid_argument(
           "specify both determinant grid dimensions or neither");
@@ -220,7 +224,9 @@ int main(int argc, char * argv[]) {
              mpi_size_b % determinant_grid_a != 0 ) --determinant_grid_a;
       determinant_grid_b = mpi_size_b / determinant_grid_a;
     }
-    if( determinant_grid_a * determinant_grid_b != mpi_size_b ) {
+    if( static_cast<size_t>(determinant_grid_a) *
+            static_cast<size_t>(determinant_grid_b) !=
+        static_cast<size_t>(mpi_size_b) ) {
       throw std::invalid_argument(
           "determinant grid dimensions must multiply to b_comm_size");
     }
