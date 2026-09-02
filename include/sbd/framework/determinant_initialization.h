@@ -2,6 +2,7 @@
 #define SBD_FRAMEWORK_DETERMINANT_INITIALIZATION_H
 
 #include <algorithm>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -38,14 +39,13 @@ void BasisInitVectorFromDeterminant(
     std::vector<ElemT> & coefficients, const DetsContainer & basis,
     const std::vector<size_t> & requested_determinant, MPI_Comm b_comm) {
   coefficients.assign(basis.size(), ElemT(0));
-  size_t local_matches = 0;
-  for(size_t index = 0; index < basis.size(); ++index) {
-    if(basis[index].size() == requested_determinant.size() &&
-       std::equal(basis[index].begin(), basis[index].end(),
-                  requested_determinant.begin(), requested_determinant.end())) {
-      coefficients[index] = ElemT(1);
-      ++local_matches;
-    }
+  const auto match = std::find(
+      basis.begin(), basis.end(), requested_determinant);
+  size_t local_matches = match == basis.end() ? 0 : 1;
+  if(match != basis.end() &&
+     std::find(std::next(match), basis.end(), requested_determinant) !=
+         basis.end()) {
+    local_matches = 2;
   }
   size_t global_matches = 0;
   MPI_Allreduce(&local_matches, &global_matches, 1, SBD_MPI_SIZE_T,
@@ -55,6 +55,10 @@ void BasisInitVectorFromDeterminant(
         global_matches == 0
             ? "initial determinant is not present in the distributed basis"
             : "initial determinant occurs more than once in the distributed basis");
+  }
+  if(match != basis.end()) {
+    coefficients[static_cast<size_t>(std::distance(basis.begin(), match))] =
+        ElemT(1);
   }
 }
 

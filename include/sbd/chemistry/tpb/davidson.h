@@ -96,23 +96,17 @@ x = 0    1    2    3
       const std::vector<size_t> & requested_bdet, MPI_Comm b_comm) {
     auto unique_index = [](const auto & basis, const auto & requested,
                            const char * name) {
-      size_t matches = 0;
-      size_t found = 0;
-      for(size_t index = 0; index < basis.size(); ++index) {
-        if(basis[index].size() == requested.size() &&
-           std::equal(basis[index].begin(), basis[index].end(),
-                      requested.begin(), requested.end())) {
-          found = index;
-          ++matches;
-        }
+      const auto match = std::find(basis.begin(), basis.end(), requested);
+      if(match == basis.end()) {
+        throw std::invalid_argument(
+            std::string("initial ") + name + " is not present in the basis");
       }
-      if(matches != 1) {
+      if(std::find(std::next(match), basis.end(), requested) != basis.end()) {
         throw std::invalid_argument(
             std::string("initial ") + name +
-            (matches == 0 ? " is not present in the basis"
-                          : " occurs more than once in the basis"));
+            " occurs more than once in the basis");
       }
-      return found;
+      return static_cast<size_t>(std::distance(basis.begin(), match));
     };
 
     const size_t ia = unique_index(adet, requested_adet, "alpha determinant");
