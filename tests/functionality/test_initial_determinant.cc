@@ -1,4 +1,5 @@
 #include "sbd/sbd.h"
+#include "sbd/framework/determinant_initialization.h"
 
 #include <cmath>
 #include <complex>
