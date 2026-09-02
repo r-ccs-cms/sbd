@@ -26,6 +26,7 @@ enum class DeterminantDistribution {
   equal_bra_a,
   count,
   count_sorted,
+  grid_cyclic,
   grid_cyclic_balanced
 };
 
@@ -37,6 +38,9 @@ DeterminantDistribution resolve_determinant_distribution(
   if( name == "equal-bra-a" ) return DeterminantDistribution::equal_bra_a;
   if( name == "count" ) return DeterminantDistribution::count;
   if( name == "count-sorted" ) return DeterminantDistribution::count_sorted;
+  if( name == "grid-cyclic" ) {
+    return DeterminantDistribution::grid_cyclic;
+  }
   if( name == "grid-cyclic-balanced" ) {
     return DeterminantDistribution::grid_cyclic_balanced;
   }
@@ -59,6 +63,7 @@ const char * determinant_distribution_name(
     case DeterminantDistribution::equal_bra_a: return "equal-bra-a";
     case DeterminantDistribution::count: return "count";
     case DeterminantDistribution::count_sorted: return "count-sorted";
+    case DeterminantDistribution::grid_cyclic: return "grid-cyclic";
     case DeterminantDistribution::grid_cyclic_balanced:
       return "grid-cyclic-balanced";
   }
@@ -200,8 +205,11 @@ int main(int argc, char * argv[]) {
       resolve_determinant_distribution(sbd_data);
   int determinant_grid_a = sbd_data.determinant_grid_a;
   int determinant_grid_b = sbd_data.determinant_grid_b;
-  if( determinant_distribution ==
-      DeterminantDistribution::grid_cyclic_balanced ) {
+  const bool uses_determinant_grid =
+      determinant_distribution == DeterminantDistribution::grid_cyclic ||
+      determinant_distribution ==
+          DeterminantDistribution::grid_cyclic_balanced;
+  if( uses_determinant_grid ) {
     if( (determinant_grid_a == 0) != (determinant_grid_b == 0) ) {
       throw std::invalid_argument(
           "specify both determinant grid dimensions or neither");
@@ -218,14 +226,13 @@ int main(int argc, char * argv[]) {
     }
   } else if( determinant_grid_a != 0 || determinant_grid_b != 0 ) {
     throw std::invalid_argument(
-        "determinant grid dimensions require grid-cyclic-balanced distribution");
+        "determinant grid dimensions require a grid-cyclic distribution");
   }
   if( mpi_rank == 0 ) {
     std::cout << "# effective determinant distribution: "
               << determinant_distribution_name(determinant_distribution)
               << std::endl;
-    if( determinant_distribution ==
-        DeterminantDistribution::grid_cyclic_balanced ) {
+    if( uses_determinant_grid ) {
       std::cout << "# determinant grid: " << determinant_grid_a << " x "
                 << determinant_grid_b << std::endl;
     }
@@ -234,13 +241,16 @@ int main(int argc, char * argv[]) {
     if( mpi_rank_t == 0 ) {
       sbd::load_basis_from_files(detfiles,det,bit_length,2*L,b_comm);
       sbd::sort_bitarray(det);
-      if( determinant_distribution ==
-          DeterminantDistribution::grid_cyclic_balanced ) {
+
+      if( uses_determinant_grid ) {
 	sbd::gdb::redistribution_grid_bra_ab_cyclic(
 	    det,bit_length,2*static_cast<size_t>(L),
 	    static_cast<size_t>(determinant_grid_a),
 	    static_cast<size_t>(determinant_grid_b),b_comm);
-	sbd::redistribution_bitarray(det,b_comm);
+	if( determinant_distribution ==
+	    DeterminantDistribution::grid_cyclic_balanced ) {
+	  sbd::redistribution_bitarray(det,b_comm);
+	}
 	sbd::sort_bitarray(det);
       } else if( determinant_distribution ==
                  DeterminantDistribution::equal_bra_a ) {

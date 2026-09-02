@@ -120,12 +120,42 @@ Below is an explanation of each command-line option.
     specified.
   - `count`: redistribute by determinant count.
   - `count-sorted`: redistribute by count and reorder within each rank.
-  - `grid-cyclic-balanced`: assign through a cyclic alpha/beta key grid,
-    redistribute by determinant count, and sort within each rank. The grid
-    dimensions default to the factor pair of `b_comm_size` closest to a square.
+  - `grid-cyclic`: assign through a cyclic alpha/beta key grid and sort within
+    each rank. This preserves the grid placement without a subsequent
+    determinant-count redistribution.
+  - `grid-cyclic-balanced`: assign as in `grid-cyclic`, then redistribute by
+    determinant count and sort within each rank.
 - `--determinant_grid_a <int>`, `--determinant_grid_b <int>`:
-  Override both grid dimensions for `grid-cyclic-balanced`. Their product must
-  equal `b_comm_size`; both must be specified together.
+  Override both grid dimensions for `grid-cyclic` or
+  `grid-cyclic-balanced`. Their product must equal `b_comm_size`; both must be
+  specified together. Without an override, the dimensions default to the
+  factor pair of `b_comm_size` closest to a square.
+
+### Distribution trade-offs
+
+The determinant distributions optimize different properties; no mode is an
+unconditional replacement for the others.
+
+- `equal-bra-a` keeps work sharing an alpha determinant together. This can
+  improve helper reuse, data locality, and Hamiltonian-application performance.
+  Its per-rank memory use may nevertheless be uneven because beta-side data and
+  helper structures associated with each alpha range are not necessarily
+  divided evenly. At high basis parallelism, the largest rank can therefore
+  determine whether the calculation fits in memory.
+- `grid-cyclic` distributes both alpha and beta keys through a 2-D grid and
+  retains that placement. It can preserve lookup locality and reduce helper
+  storage, but determinant counts may be uneven across ranks.
+- `grid-cyclic-balanced` applies an additional count redistribution. This can
+  reduce determinant-count and peak-memory imbalance, but may lose grid
+  locality and is not guaranteed to reduce lookup work, helper memory, or run
+  time.
+
+Choose the distribution according to the limiting resource: `equal-bra-a` may
+be preferable when alpha locality and time to solution dominate.
+`grid-cyclic` is preferable when the cyclic partition is already sufficiently
+balanced, while `grid-cyclic-balanced` is available when determinant-count or
+peak-memory imbalance is the limiting concern. Measure the relevant modes on
+the target system when more than one choice fits in memory.
 
 ### Determinant distribution compatibility
 
@@ -146,7 +176,7 @@ program choose the `2 x 2` grid, use:
 
 ```bash
 --b_comm_size 4 \
---determinant_distribution grid-cyclic-balanced
+--determinant_distribution grid-cyclic
 ```
 
 To choose the dimensions explicitly, add both options:
