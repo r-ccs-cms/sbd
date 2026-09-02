@@ -23,6 +23,11 @@ Below is an explanation of each command-line option.
   Specifiles one or more files containing the bitstrings used as basis states. Multiple files can be provided by separating them with commans (e.g., `--basisfiles basis0.txt,basis1.txt,basis2.txt`). The number of files does not need to match the value of `b_comm_size` described below.
 - `--loadname` (str):  
   Specifies the filename of the binary data used as the initial wavefunction.
+- `--initial_determinant_bitstring` (str):
+  Place unit weight on the specified basis bitstring. Its length must equal
+  `system_size`, it must occur exactly once in the distributed basis, and it
+  is used only when `--loadname` is not specified. Loading takes precedence
+  when both options are present.
 - `--savename` (str):  
   Specifies the filename to save the resulting ground-state wavefunction as binary data.
 - `--t_comm_size` (int):  

@@ -53,6 +53,12 @@ Below is an explanation of each command-line option.
   The names of the file containing the set of determinants (bitstrings).
 - `--loadname <str>`:  
   The name of the file containing the wavefunction data to load. If not specified, no loading is performed and the Hartree–Fock (HF) solution is used as the initial state.
+- `--initial_determinant_bitstring <str>`:
+  Place unit weight on this determinant instead of using the `--init` policy.
+  The string must contain exactly `2*NORB` bits in the same order as the
+  determinant files and must occur exactly once in the distributed basis.
+  It is used only when `--loadname` is not specified. Loading takes precedence
+  when both options are present.
 - `--savename <str>`:  
   The name of the file in which to save the resulting wavefunction data. If not specified, the wavefunction is not saved.
 - `--b_comm_size <int>`:
