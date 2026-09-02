@@ -159,6 +159,8 @@ the target system when more than one choice fits in memory.
 
 ### Determinant distribution compatibility
 
+The string selector and grid modes apply to the standard application path; `SBD_FILEIN` retains its legacy distribution behavior.
+
 If `--determinant_distribution` is present, its string value determines the
 placement and the legacy boolean flags are ignored. If it is absent, the
 existing behavior is preserved:
