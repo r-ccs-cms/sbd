@@ -10,6 +10,7 @@
 
 #include <mpi.h>
 
+#include "sbd/chemistry/gdb/helper.h"
 #include "sbd/framework/bit_manipulation.h"
 
 namespace sbd {
@@ -23,45 +24,9 @@ inline bool equal_key(const KeyA& a,
   return !sbd::less_from_back(a, b) && !sbd::less_from_back(b, a);
 }
 
-inline size_t spin_mask_word(const size_t word_index,
-                             const size_t bit_length,
-                             const bool alpha) {
-  size_t mask = 0;
-  for (size_t p = 0; p < bit_length; ++p) {
-    const bool is_alpha = (((word_index * bit_length + p) & size_t(1)) == 0);
-    if (is_alpha == alpha) {
-      mask |= (size_t(1) << p);
-    }
-  }
-  return mask;
-}
-
-template<class DetRow>
-inline std::vector<size_t> masked_spin_key(const DetRow& det,
-                                           const size_t bit_length,
-                                           const bool alpha) {
-  std::vector<size_t> key(det.size(), 0);
-  for (size_t k = 0; k < det.size(); ++k) {
-    key[k] = det[k] & spin_mask_word(k, bit_length, alpha);
-  }
-  return key;
-}
-
-inline sbd::det_vector<size_t> make_local_unique_spin_keys(
-    const sbd::det_vector<size_t>& config,
-    const size_t bit_length,
-    const bool alpha) {
-  sbd::det_vector<size_t> keys;
-  keys.reserve(config.size());
-  for (const auto& det : config) {
-    keys.emplace_back(masked_spin_key(det, bit_length, alpha));
-  }
-  sbd::sort_unique_local_bitarray(keys);
-  return keys;
-}
-
-inline void erase_cross_rank_duplicates(sbd::det_vector<size_t>& keys,
-                                        MPI_Comm comm) {
+template<sbd::det_kind Kind>
+inline void erase_cross_rank_duplicates(
+    sbd::det_vector<size_t, Kind>& keys, MPI_Comm comm) {
   int mpi_rank = 0;
   int mpi_size = 1;
   MPI_Comm_rank(comm, &mpi_rank);
@@ -104,13 +69,10 @@ inline void erase_cross_rank_duplicates(sbd::det_vector<size_t>& keys,
   if (same_as_prev_last) keys.erase(keys.begin());
 }
 
-inline sbd::det_vector<size_t> make_global_unique_spin_keys(
-    const sbd::det_vector<size_t>& config,
-    const size_t bit_length,
-    const bool alpha,
-    MPI_Comm comm) {
-  sbd::det_vector<size_t> keys =
-      make_local_unique_spin_keys(config, bit_length, alpha);
+template<sbd::det_kind Kind>
+inline sbd::det_vector<size_t, Kind> make_global_unique_spin_keys(
+    const sbd::det_vector<size_t, Kind>& local_unique_keys, MPI_Comm comm) {
+  sbd::det_vector<size_t, Kind> keys = local_unique_keys;
   sbd::sort_global_bitarray(keys, comm);
   erase_cross_rank_duplicates(keys, comm);
   return keys;
@@ -135,9 +97,10 @@ inline std::vector<size_t> gather_counts_and_local_begin(const size_t local_n,
   return counts;
 }
 
+template<sbd::det_kind Kind>
 inline std::vector<int> cyclic_blocks_for_local_unique_keys(
-    const sbd::det_vector<size_t>& global_keys,
-    const sbd::det_vector<size_t>& local_unique_queries,
+    const sbd::det_vector<size_t, Kind>& global_keys,
+    const sbd::det_vector<size_t, Kind>& local_unique_queries,
     const size_t n_parts,
     MPI_Comm comm) {
   int mpi_rank = 0;
@@ -390,9 +353,10 @@ inline void alltoallv_determinants(sbd::det_vector<size_t>& config,
 
 }
 
+template<sbd::det_kind Kind>
 inline int block_for_key_from_unique_list(
     const std::vector<size_t>& key,
-    const sbd::det_vector<size_t>& local_unique_keys,
+    const sbd::det_vector<size_t, Kind>& local_unique_keys,
     const std::vector<int>& local_blocks) {
   auto it = std::lower_bound(local_unique_keys.begin(), local_unique_keys.end(), key,
                              [](const auto& a, const auto& b) {
@@ -422,8 +386,12 @@ inline void redistribution_grid_bra_ab_cyclic(
   if (N_a * N_b != static_cast<size_t>(mpi_size)) {
     throw std::runtime_error("redistribution_grid_bra_ab_cyclic: N_a * N_b must equal MPI_Comm_size(comm).");
   }
+  if (total_bit_length % 2 != 0) {
+    throw std::runtime_error("redistribution_grid_bra_ab_cyclic: total bit length must be even.");
+  }
 
   const size_t num_words = (total_bit_length + bit_length - 1) / bit_length;
+  const size_t norb = total_bit_length / 2;
 
 #ifndef NDEBUG
   for (const auto& det : config) assert(det.size() == num_words);
@@ -431,26 +399,32 @@ inline void redistribution_grid_bra_ab_cyclic(
 
   using namespace grid_ab_detail;
 
-  const sbd::det_vector<size_t> alpha_global_keys =
-      make_global_unique_spin_keys(config, bit_length, true, comm);
-  const sbd::det_vector<size_t> beta_global_keys =
-      make_global_unique_spin_keys(config, bit_length, false, comm);
+  sbd::det_vector<size_t, sbd::det_kind::half> local_alpha_unique;
+  sbd::det_vector<size_t, sbd::det_kind::half> local_beta_unique;
+  std::vector<size_t> alpha_counts;
+  std::vector<size_t> beta_counts;
+  sbd::gdb::getHalfDets(config, bit_length, norb,
+                        local_alpha_unique, local_beta_unique,
+                        alpha_counts, beta_counts);
+
+  const auto alpha_global_keys =
+      make_global_unique_spin_keys(local_alpha_unique, comm);
+  const auto beta_global_keys =
+      make_global_unique_spin_keys(local_beta_unique, comm);
 
   std::vector<int> dest_per_det(config.size(), 0);
-
-  const auto local_alpha_unique =
-      make_local_unique_spin_keys(config, bit_length, true);
-  const auto local_beta_unique =
-      make_local_unique_spin_keys(config, bit_length, false);
 
   const auto local_alpha_blocks = cyclic_blocks_for_local_unique_keys(
       alpha_global_keys, local_alpha_unique, N_a, comm);
   const auto local_beta_blocks = cyclic_blocks_for_local_unique_keys(
       beta_global_keys, local_beta_unique, N_b, comm);
 
+  const size_t half_words = (norb + bit_length - 1) / bit_length;
+  std::vector<size_t> alpha_key(half_words, 0);
+  std::vector<size_t> beta_key(half_words, 0);
   for (size_t i = 0; i < config.size(); ++i) {
-    const auto alpha_key = masked_spin_key(config[i], bit_length, true);
-    const auto beta_key = masked_spin_key(config[i], bit_length, false);
+    sbd::getAdet(config[i], bit_length, norb, alpha_key);
+    sbd::getBdet(config[i], bit_length, norb, beta_key);
     const int a_block = block_for_key_from_unique_list(
         alpha_key, local_alpha_unique, local_alpha_blocks);
     const int b_block = block_for_key_from_unique_list(
