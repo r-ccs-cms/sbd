@@ -12,6 +12,7 @@
 #include "sbd/caop/basic/lanczos.h"
 #include "sbd/caop/basic/restart.h"
 #include "sbd/caop/basic/carryover.h"
+#include "sbd/caop/basic/expansion.h"
 #include "sbd/caop/basic/sbdiag.h"
 
 
