@@ -395,8 +395,12 @@ void MultGDBThrust<ElemT>::correlation(const std::vector<ElemT> & w_in,
 
 			rw = tw;
 			sbd::MpiSlide(rw, tw, slide, this->b_comm());
-			sbd::gdb::MpiSlide(idxmap, idxmap_storage, tidxmap, tidxmap_storage, -exidx[0].slide, this->b_comm());
-
+			// Slide the CURRENT index map together with the wavefunction, as the CPU path
+			// (correlation.h) and the Hamiltonian loop (mult_thrust.h) do. The previous code
+			// re-slid the ORIGINAL idxmap by -exidx[0].slide here before applying `slide`,
+			// which left tidxmap one or more tasks behind tw for every task >= 2 (the third
+			// task on) when b_comm_size >= 3: wrong 1-/2-RDM values when all ranks hold equal alpha counts,
+			// a hang (size mismatch in the correlation kernels) when they do not.
 			thrust::device_vector<uint32_t> ridxmap_storage;
 			DetIndexMapThrust ridxmap;
 			ridxmap.copy(ridxmap_storage, tidxmap, tidxmap_storage);
