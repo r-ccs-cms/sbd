@@ -44,12 +44,6 @@ void append_unique(DetsContainer& destination, DetsContainer source) {
   destination = std::move(merged);
 }
 
-template <typename DetsContainer>
-void finalize_distributed_layout(DetsContainer& candidates, MPI_Comm comm) {
-  ::sbd::sort_global_bitarray(candidates, comm);
-  ::sbd::redistribution_bitarray(candidates, comm);
-}
-
 } // namespace detail
 
 
@@ -243,6 +237,19 @@ struct HeatbathLookup {
   std::vector<std::size_t> creation_counts;
 };
 
+struct HeatbathExpansionStats {
+  std::size_t parents = 0;
+  std::size_t terms_visited = 0;
+  std::size_t mask_rejections = 0;
+  std::size_t accepted_before_unique = 0;
+};
+
+struct HeatbathExpansionProfile {
+  double generation_seconds = 0.0;
+  double global_sort_unique_seconds = 0.0;
+  double redistribution_seconds = 0.0;
+};
+
 template <typename LookupCoeffT, typename ElemT, typename Transform>
 HeatbathLookup<LookupCoeffT> MakeHeatbathLookup(
     const ::sbd::GeneralOp<ElemT>& hamiltonian,
@@ -357,7 +364,9 @@ void HeatbathExpansion(
     DetsContainer& candidates,
     MPI_Comm h_comm,
     MPI_Comm t_comm,
-    MPI_Comm comm) {
+    MPI_Comm comm,
+    HeatbathExpansionStats* stats = nullptr,
+    HeatbathExpansionProfile* profile = nullptr) {
   if(parents.size() != coefficients.size())
     throw std::invalid_argument("parent and coefficient counts differ");
   if(lookup.creation_masks.size() != lookup.coefficients.size() ||
@@ -378,6 +387,10 @@ void HeatbathExpansion(
   std::size_t end = parents.size();
   ::sbd::get_mpi_range(t_size, t_rank, begin, end);
 
+  HeatbathExpansionStats local_stats;
+  if(h_rank == 0) local_stats.parents = end - begin;
+  const double generation_start = profile == nullptr ? 0.0 : MPI_Wtime();
+
   candidates.clear();
   if(h_rank == 0)
     candidates.insert(candidates.end(), parents.begin() + begin,
@@ -388,6 +401,7 @@ void HeatbathExpansion(
 #endif
   {
     DetsContainer thread_candidates;
+    HeatbathExpansionStats thread_stats;
     std::vector<std::size_t> child;
     int thread_count = 1;
 #ifdef _OPENMP
@@ -415,17 +429,64 @@ void HeatbathExpansion(
       for(std::size_t term_index = 0;
           term_index < lookup.coefficients.size(); ++term_index) {
         if(!(lookup.coefficients[term_index] > threshold)) break;
+        if(stats != nullptr) ++thread_stats.terms_visited;
         if(ApplyHeatbathTerm(
                parents[parent_index],lookup,term_index,child)) {
           thread_candidates.push_back(child);
+          if(stats != nullptr) ++thread_stats.accepted_before_unique;
           if(thread_candidates.size() == local_batch_size) flush();
+        } else if(stats != nullptr) {
+          ++thread_stats.mask_rejections;
         }
       }
     }
     flush();
+    if(stats != nullptr) {
+#ifdef _OPENMP
+#pragma omp critical(sbd_caop_heatbath_stats)
+#endif
+      {
+        local_stats.terms_visited += thread_stats.terms_visited;
+        local_stats.mask_rejections += thread_stats.mask_rejections;
+        local_stats.accepted_before_unique +=
+            thread_stats.accepted_before_unique;
+      }
+    }
   }
 
-  detail::finalize_distributed_layout(candidates, comm);
+  double local_profile[3] = {};
+  if(profile != nullptr)
+    local_profile[0] = MPI_Wtime() - generation_start;
+  const double sort_start = profile == nullptr ? 0.0 : MPI_Wtime();
+  ::sbd::sort_global_bitarray(candidates, comm);
+  if(profile != nullptr)
+    local_profile[1] = MPI_Wtime() - sort_start;
+  const double redistribution_start =
+      profile == nullptr ? 0.0 : MPI_Wtime();
+  ::sbd::redistribution_bitarray(candidates, comm);
+  if(profile != nullptr) {
+    local_profile[2] = MPI_Wtime() - redistribution_start;
+    double maximum_profile[3] = {};
+    MPI_Allreduce(local_profile, maximum_profile, 3, MPI_DOUBLE, MPI_MAX, comm);
+    profile->generation_seconds = maximum_profile[0];
+    profile->global_sort_unique_seconds = maximum_profile[1];
+    profile->redistribution_seconds = maximum_profile[2];
+  }
+  if(stats != nullptr) {
+    const unsigned long long local_counts[4] = {
+        static_cast<unsigned long long>(local_stats.parents),
+        static_cast<unsigned long long>(local_stats.terms_visited),
+        static_cast<unsigned long long>(local_stats.mask_rejections),
+        static_cast<unsigned long long>(local_stats.accepted_before_unique)};
+    unsigned long long global_counts[4] = {};
+    MPI_Allreduce(local_counts, global_counts, 4, MPI_UNSIGNED_LONG_LONG,
+                  MPI_SUM, comm);
+    stats->parents = static_cast<std::size_t>(global_counts[0]);
+    stats->terms_visited = static_cast<std::size_t>(global_counts[1]);
+    stats->mask_rejections = static_cast<std::size_t>(global_counts[2]);
+    stats->accepted_before_unique =
+        static_cast<std::size_t>(global_counts[3]);
+  }
 }
 
 

@@ -86,6 +86,13 @@ Below is an explanation of each command-line option.
   basis and wavefunction ordering used by diagonalization and saving are not
   modified.
 
+For deterministic Heatbath carryover, the application reports the final
+global candidate count separately from expansion statistics and phase timings.
+Statistics are summed over all MPI ranks. Timings are the maximum elapsed time
+over all ranks and are reported for parent truncation, parent redistribution,
+lookup construction, local generation, global sort/unique, final
+redistribution, and the complete carryover operation.
+
 ---
 
 ## `gen_ham.py` — Hamiltonian Generator for Extended Hard-Core Boson Models

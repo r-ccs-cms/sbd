@@ -166,14 +166,22 @@ void test_cutoff_boundary(int h_rank, int b_rank,
   const std::size_t expected_counts[] = {2, 1, 1};
   for(std::size_t test = 0; test < 3; ++test) {
     sbd::det_vector<std::size_t> candidates;
+    sbd::caop::HeatbathExpansionStats stats;
+    sbd::caop::HeatbathExpansionProfile profile;
     sbd::caop::HeatbathExpansion(
         parents, coefficients, lookup, cutoffs[test], 1, candidates,
-        h_comm, t_comm, world);
+        h_comm, t_comm, world, &stats, &profile);
     std::size_t local_count = candidates.size();
     std::size_t global_count = 0;
     MPI_Allreduce(&local_count, &global_count, 1, SBD_MPI_SIZE_T,
                   MPI_SUM, world);
-    bool valid = global_count == expected_counts[test];
+    bool valid = global_count == expected_counts[test] && stats.parents == 1 &&
+                 stats.terms_visited == (test == 0 ? 1 : 0) &&
+                 stats.mask_rejections == 0 &&
+                 stats.accepted_before_unique == (test == 0 ? 1 : 0) &&
+                 profile.generation_seconds >= 0.0 &&
+                 profile.global_sort_unique_seconds >= 0.0 &&
+                 profile.redistribution_seconds >= 0.0;
     for(const auto& candidate : candidates)
       valid = valid && (candidate[0] == 1 ||
                         (test == 0 && candidate[0] == 2));

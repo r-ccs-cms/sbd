@@ -156,8 +156,18 @@ namespace sbd {
     }
 
     namespace detail {
+      struct HeatbathCarryoverResult {
+        size_t candidate_count = 0;
+        HeatbathExpansionStats stats;
+        HeatbathExpansionProfile expansion_profile;
+        double truncation_seconds = 0.0;
+        double parent_redistribution_seconds = 0.0;
+        double lookup_seconds = 0.0;
+        double total_seconds = 0.0;
+      };
+
       template <typename ElemT>
-      size_t make_heatbath_carryover(
+      HeatbathCarryoverResult make_heatbath_carryover(
           const SBD & sbd_data,
           const GeneralOp<ElemT> & hamiltonian,
           const det_vector<size_t> & basis,
@@ -167,6 +177,7 @@ namespace sbd {
           MPI_Comm b_comm,
           MPI_Comm t_comm,
           MPI_Comm comm) {
+        const double total_start = MPI_Wtime();
         if( sbd_data.heatbath_parent_distribution != 0 &&
             sbd_data.heatbath_parent_distribution != 1 )
           throw std::invalid_argument(
@@ -174,10 +185,15 @@ namespace sbd {
 
         det_vector<size_t> parents(basis);
         std::vector<ElemT> coefficients(wavefunction);
+        const double truncation_start = MPI_Wtime();
         TruncateHeatbathParents(parents,coefficients,
                                 sbd_data.heatbath_truncation);
+        const double truncation_seconds = MPI_Wtime() - truncation_start;
+        const double redistribution_start = MPI_Wtime();
         if( sbd_data.heatbath_parent_distribution == 1 )
           RedistributeHeatbathParents(parents,coefficients,b_comm);
+        const double parent_redistribution_seconds =
+            MPI_Wtime() - redistribution_start;
 
         if( sbd_data.bit_length == 0 )
           throw std::invalid_argument("bit length must be nonzero");
@@ -185,21 +201,34 @@ namespace sbd {
             (sbd_data.system_size + sbd_data.bit_length - 1) /
             sbd_data.bit_length;
         using RealT = detail::magnitude_type<ElemT>;
+        const double lookup_start = MPI_Wtime();
         const auto lookup = MakeHeatbathLookup<RealT>(
             hamiltonian,determinant_words,sbd_data.bit_length,
             [](const ElemT & coefficient) -> RealT {
               return std::abs(coefficient);
             });
+        const double lookup_seconds = MPI_Wtime() - lookup_start;
+        HeatbathCarryoverResult result;
         HeatbathExpansion(parents,coefficients,lookup,
                           sbd_data.heatbath_cutoff,
                           sbd_data.heatbath_batch_size,
-                          carryover_basis,h_comm,t_comm,comm);
+                          carryover_basis,h_comm,t_comm,comm,
+                          &result.stats,&result.expansion_profile);
 
         size_t local_count = carryover_basis.size();
-        size_t global_count = 0;
-        MPI_Allreduce(&local_count,&global_count,1,
+        MPI_Allreduce(&local_count,&result.candidate_count,1,
                       SBD_MPI_SIZE_T,MPI_SUM,comm);
-        return global_count;
+        const double local_timings[4] = {
+            truncation_seconds, parent_redistribution_seconds,
+            lookup_seconds, MPI_Wtime() - total_start};
+        double maximum_timings[4] = {};
+        MPI_Allreduce(local_timings,maximum_timings,4,
+                      MPI_DOUBLE,MPI_MAX,comm);
+        result.truncation_seconds = maximum_timings[0];
+        result.parent_redistribution_seconds = maximum_timings[1];
+        result.lookup_seconds = maximum_timings[2];
+        result.total_seconds = maximum_timings[3];
+        return result;
       }
     } // namespace detail
     
@@ -447,11 +476,32 @@ namespace sbd {
 	  std::cout << " " << make_timestamp()
 		    << " sbd: start deterministic heatbath expansion" << std::endl;
 	}
-	const size_t global_candidate_count = detail::make_heatbath_carryover(
+	const auto heatbath_result = detail::make_heatbath_carryover(
 	    sbd_data,H,basis,W,co_basis,h_comm,b_comm,t_comm,comm);
 	if( mpi_rank == 0 ) {
-	  std::cout << "# heatbath candidate count: "
-	            << global_candidate_count << std::endl;
+	  std::cout << " " << make_timestamp()
+	            << " sbd: heatbath candidate count: "
+	            << heatbath_result.candidate_count << std::endl;
+	  std::cout << " " << make_timestamp()
+	            << " sbd: heatbath expansion stats: parents="
+	            << heatbath_result.stats.parents
+	            << " terms_visited=" << heatbath_result.stats.terms_visited
+	            << " mask_rejections=" << heatbath_result.stats.mask_rejections
+	            << " accepted_before_unique="
+	            << heatbath_result.stats.accepted_before_unique << std::endl;
+	  std::cout << " " << make_timestamp()
+	            << " sbd: heatbath expansion profile seconds: truncation="
+	            << heatbath_result.truncation_seconds
+	            << " parent_redistribution="
+	            << heatbath_result.parent_redistribution_seconds
+	            << " lookup=" << heatbath_result.lookup_seconds
+	            << " generation="
+	            << heatbath_result.expansion_profile.generation_seconds
+	            << " global_sort_unique="
+	            << heatbath_result.expansion_profile.global_sort_unique_seconds
+	            << " redistribution="
+	            << heatbath_result.expansion_profile.redistribution_seconds
+	            << " total=" << heatbath_result.total_seconds << std::endl;
 	  std::cout << " " << make_timestamp()
 		    << " sbd: end deterministic heatbath expansion" << std::endl;
 	}
