@@ -6,6 +6,7 @@
 #define SBD_CHEMISTRY_GDB_DBDIAG_H
 
 #include "sbd/framework/timestamp.h"
+#include "sbd/framework/determinant_initialization.h"
 
 namespace sbd {
   namespace gdb {
@@ -20,6 +21,7 @@ namespace sbd {
       double eps = 1.0e-4;
       double max_time = 86400.0;
       int init = 0;
+      std::string initial_determinant_bitstring;
       int do_shuffle = 0;
       int do_rdm = 0;
       int carryover_type = 0;
@@ -34,6 +36,9 @@ namespace sbd {
       bool do_sort_det = false;
       bool do_redist_det = false;
       bool do_redist_alpha_eq = true;
+      std::string determinant_distribution;
+      int determinant_grid_a = 0;
+      int determinant_grid_b = 0;
     };
 
     SBD generate_sbd_data(int argc, char * argv[]) {
@@ -41,6 +46,10 @@ namespace sbd {
       for(int i=0; i < argc; i++) {
 	if ( std::string(argv[i]) == "--init" ) {
 	  sbd_data.init = std::atoi(argv[++i]);
+	}
+	if ( std::string(argv[i]) == "--initial_determinant_bitstring" ||
+	     std::string(argv[i]) == "--initial-determinant-bitstring" ) {
+	  sbd_data.initial_determinant_bitstring = std::string(argv[++i]);
 	}
 	if ( std::string(argv[i]) == "--seed" ) {
 	  sbd_data.seed = std::atoi(argv[++i]);
@@ -105,6 +114,18 @@ namespace sbd {
 	}
 	if( std::string(argv[i]) == "--do_redist_alpha_eq" ) {
 	  sbd_data.do_redist_alpha_eq = ( std::atoi(argv[++i]) != 0 );
+	}
+	if( std::string(argv[i]) == "--determinant_distribution" ||
+	    std::string(argv[i]) == "--determinant-distribution" ) {
+	  sbd_data.determinant_distribution = std::string(argv[++i]);
+	}
+	if( std::string(argv[i]) == "--determinant_grid_a" ||
+	    std::string(argv[i]) == "--determinant-grid-a" ) {
+	  sbd_data.determinant_grid_a = std::atoi(argv[++i]);
+	}
+	if( std::string(argv[i]) == "--determinant_grid_b" ||
+	    std::string(argv[i]) == "--determinant-grid-b" ) {
+	  sbd_data.determinant_grid_b = std::atoi(argv[++i]);
 	}
       }
       return sbd_data;
@@ -268,8 +289,26 @@ namespace sbd {
       auto time_start_init = std::chrono::high_resolution_clock::now();
       std::vector<ElemT> w;
       if( loadname.empty() ) {
-	sbd::gdb::BasisInitVector(w,det,h_comm,b_comm,t_comm,init,seed);
+	if( sbd_data.initial_determinant_bitstring.empty() ) {
+	  if( mpi_rank == 0 ) {
+	    std::cout << "# initial vector source: default" << std::endl;
+	  }
+	  sbd::gdb::BasisInitVector(w,det,h_comm,b_comm,t_comm,init,seed);
+	} else {
+	  if( mpi_rank == 0 ) {
+	    std::cout << "# initial vector source: explicit determinant" << std::endl;
+	    std::cout << "# initial determinant bitstring: "
+	              << sbd_data.initial_determinant_bitstring << std::endl;
+	  }
+	  const auto initial_determinant = from_string_checked(
+	      sbd_data.initial_determinant_bitstring, bit_length, 2*static_cast<size_t>(L));
+	  BasisInitVectorFromDeterminant(w,det,initial_determinant,b_comm);
+	}
       } else {
+	if( mpi_rank == 0 ) {
+	  std::cout << "# initial vector source: load" << std::endl;
+	  std::cout << "# load name: " << loadname << std::endl;
+	}
 	sbd::LoadWavefunction(loadname,det,h_comm,b_comm,t_comm,w);
       }
       if( sbd_data.timing_barriers ) MPI_Barrier(comm);

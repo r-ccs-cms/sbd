@@ -6,6 +6,7 @@
 #define SBD_CAOP_BASIC_SBDIAG_H
 
 #include "sbd/framework/timestamp.h"
+#include "sbd/framework/determinant_initialization.h"
 
 namespace sbd {
   namespace caop {
@@ -21,6 +22,7 @@ namespace sbd {
       int max_iv = 1;
       double eps = 1.0e-4;
       int init = 0;
+      std::string initial_determinant_bitstring;
       size_t seed = 0;
 
       size_t system_size = 64;
@@ -68,6 +70,10 @@ namespace sbd {
 	}
 	if( std::string(argv[i]) == "--init" ) {
 	  sbd_data.init = std::atoi(argv[++i]);
+	}
+	if( std::string(argv[i]) == "--initial_determinant_bitstring" ||
+	    std::string(argv[i]) == "--initial-determinant-bitstring" ) {
+	  sbd_data.initial_determinant_bitstring = std::string(argv[++i]);
 	}
 	if( std::string(argv[i]) == "--seed" ) {
 	  sbd_data.seed = std::stoull(argv[++i]);
@@ -177,8 +183,26 @@ namespace sbd {
       auto time_start_init = std::chrono::high_resolution_clock::now();
       std::vector<ElemT> W;
       if ( loadname.empty() ) {
-	InitVectorCAOP(W,basis,h_comm,b_comm,t_comm,init,seed);
+	if( sbd_data.initial_determinant_bitstring.empty() ) {
+	  if( mpi_rank == 0 ) {
+	    std::cout << "# initial vector source: default" << std::endl;
+	  }
+	  InitVectorCAOP(W,basis,h_comm,b_comm,t_comm,init,seed);
+	} else {
+	  if( mpi_rank == 0 ) {
+	    std::cout << "# initial vector source: explicit determinant" << std::endl;
+	    std::cout << "# initial determinant bitstring: "
+	              << sbd_data.initial_determinant_bitstring << std::endl;
+	  }
+	  const auto initial_determinant = from_string_checked(
+	      sbd_data.initial_determinant_bitstring, bit_length, system_size);
+	  BasisInitVectorFromDeterminant(W,basis,initial_determinant,b_comm);
+	}
       } else {
+	if( mpi_rank == 0 ) {
+	  std::cout << "# initial vector source: load" << std::endl;
+	  std::cout << "# load name: " << loadname << std::endl;
+	}
 	LoadWavefunction(loadname,basis,h_comm,b_comm,t_comm,W);
       }
       auto time_end_init = std::chrono::high_resolution_clock::now();

@@ -55,6 +55,13 @@ Below is an explanation of each command-line option.
   If this option is not specified, the beta-spin determinant set is taken to be identical to that provided via `--adetfile`.
 - `--loadname <str>`:  
   The name of the file containing the wavefunction data to load. If not specified, no loading is performed and the Hartree–Fock (HF) solution is used as the initial state.
+- `--initial_adeterminant_bitstring <str>`, `--initial_bdeterminant_bitstring <str>`:
+  Place unit weight on the specified alpha/beta determinant product. The alpha
+  option is required for explicit initialization. If beta is omitted, the
+  alpha bitstring is also used for beta; beta cannot be specified alone. Each
+  string must contain exactly `NORB` bits and occur exactly once in its basis.
+  These options are used only when `--loadname` is not specified; loading takes
+  precedence when both are present.
 - `--savename <str>`:  
   The name of the file in which to save the resulting wavefunction data. If not specified, the wavefunction is not saved.
 - `--task_comm_size <int>`:  
@@ -99,4 +106,3 @@ Below is an explanation of each command-line option.
   Whether to compute the 1-particle and 2-particle reduced density matrices (1pRDM and 2pRDM). If set to 0, they are not computed; otherwise, they are computed.
 - `--bit_length <int>`:  
   Specifies the bit length handled by each size_t when representing bitstrings using `std::vector<size_t>`. The default value is 20.
-

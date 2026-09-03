@@ -1,6 +1,7 @@
 #ifndef SBD_CHEMISTRY_GDB_INC_ALL_H
 #define SBD_CHEMISTRY_GDB_INC_ALL_H
 
+#include "sbd/chemistry/gdb/grid_distribution.h"
 #include "sbd/chemistry/gdb/helper.h"
 #ifdef SBD_THRUST
 #include "sbd/chemistry/gdb/helper_thrust.h"

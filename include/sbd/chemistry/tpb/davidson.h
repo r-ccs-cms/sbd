@@ -86,6 +86,46 @@ x = 0    1    2    3
     }
   }
 
+  template <typename ElemT>
+  void BasisInitVectorFromDeterminants(
+      std::vector<ElemT> & W,
+      const det_vector<size_t, det_kind::half> & adet,
+      const det_vector<size_t, det_kind::half> & bdet,
+      const size_t adet_comm_size, const size_t bdet_comm_size,
+      const std::vector<size_t> & requested_adet,
+      const std::vector<size_t> & requested_bdet, MPI_Comm b_comm) {
+    auto unique_index = [](const auto & basis, const auto & requested,
+                           const char * name) {
+      const auto match = std::find(basis.begin(), basis.end(), requested);
+      if(match == basis.end()) {
+        throw std::invalid_argument(
+            std::string("initial ") + name + " is not present in the basis");
+      }
+      if(std::find(std::next(match), basis.end(), requested) != basis.end()) {
+        throw std::invalid_argument(
+            std::string("initial ") + name +
+            " occurs more than once in the basis");
+      }
+      return static_cast<size_t>(std::distance(basis.begin(), match));
+    };
+
+    const size_t ia = unique_index(adet, requested_adet, "alpha determinant");
+    const size_t ib = unique_index(bdet, requested_bdet, "beta determinant");
+    int mpi_rank_b = 0;
+    MPI_Comm_rank(b_comm, &mpi_rank_b);
+    const int adet_rank = mpi_rank_b / static_cast<int>(bdet_comm_size);
+    const int bdet_rank = mpi_rank_b % static_cast<int>(bdet_comm_size);
+    size_t adet_start = 0, adet_end = adet.size();
+    size_t bdet_start = 0, bdet_end = bdet.size();
+    get_mpi_range(adet_comm_size, adet_rank, adet_start, adet_end);
+    get_mpi_range(bdet_comm_size, bdet_rank, bdet_start, bdet_end);
+    W.assign((adet_end-adet_start)*(bdet_end-bdet_start), ElemT(0));
+    if(adet_start <= ia && ia < adet_end &&
+       bdet_start <= ib && ib < bdet_end) {
+      W[(ia-adet_start)*(bdet_end-bdet_start) + (ib-bdet_start)] = ElemT(1);
+    }
+  }
+
 /**
    Initializer for the wave function
    @tparam ElemT: Type of elements for the Hamiltonian and the wave functions

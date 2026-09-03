@@ -82,6 +82,14 @@ test: $(TEST_EXECS)
 		echo ""; \
 		echo "Running $$test..."; \
 		case $$test in \
+			test_initial_determinant) \
+				echo "  (MPI regression - distributed initial states)"; \
+				$(MPI_LAUNCHER) -n 4 ./$$test; \
+				;; \
+			test_gdb_grid_distribution) \
+				echo "  (MPI regression - grid ownership, empty ranks, and count redistribution)"; \
+				$(MPI_LAUNCHER) -n 4 ./$$test; \
+				;; \
 			test_heatbath_expansion) \
 				echo "  (MPI regression - h and t replicated layouts)"; \
 				$(MPI_LAUNCHER) -n 4 ./$$test ../../data/h2o/fcidump.txt h && \

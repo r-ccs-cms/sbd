@@ -5,6 +5,8 @@
 #ifndef SBD_CHEMISTRY_TPB_SBDIAG_H
 #define SBD_CHEMISTRY_TPB_SBDIAG_H
 
+#include "sbd/framework/determinant_initialization.h"
+
 #ifdef SBD_USE_NCCL
 #include <nccl.h>
 #endif
@@ -31,6 +33,8 @@ namespace sbd {
       double eps = 1.0e-4;
       double max_time = 86400.0;
       int init = 0;
+      std::string initial_adeterminant_bitstring;
+      std::string initial_bdeterminant_bitstring;
       size_t seed = 1729;
       int do_shuffle = 0;
       int do_rdm = 0;
@@ -66,6 +70,14 @@ namespace sbd {
 	}
 	if( std::string(argv[i]) == "--init" ) {
 	  sbd_data.init = std::atoi(argv[++i]);
+	}
+	if( std::string(argv[i]) == "--initial_adeterminant_bitstring" ||
+	    std::string(argv[i]) == "--initial-adeterminant-bitstring" ) {
+	  sbd_data.initial_adeterminant_bitstring = std::string(argv[++i]);
+	}
+	if( std::string(argv[i]) == "--initial_bdeterminant_bitstring" ||
+	    std::string(argv[i]) == "--initial-bdeterminant-bitstring" ) {
+	  sbd_data.initial_bdeterminant_bitstring = std::string(argv[++i]);
 	}
 	if( std::string(argv[i]) == "--seed" ) {
 	  sbd_data.seed = std::atoi(argv[++i]);
@@ -285,8 +297,50 @@ namespace sbd {
       auto time_start_init = std::chrono::high_resolution_clock::now();
       std::vector<double> W;
       if( loadname == std::string("") ) {
-	sbd::BasisInitVector(W,adet,bdet,adet_comm_size,bdet_comm_size,h_comm,b_comm,t_comm,init,seed);
+	const bool has_initial_adet =
+	    !sbd_data.initial_adeterminant_bitstring.empty();
+	const bool has_initial_bdet =
+	    !sbd_data.initial_bdeterminant_bitstring.empty();
+	if( !has_initial_adet && has_initial_bdet ) {
+	  throw std::invalid_argument(
+	      "an initial beta determinant requires an initial alpha determinant");
+	}
+	if( !has_initial_adet ) {
+	  if( mpi_rank == 0 ) {
+	    std::cout << "# initial vector source: default" << std::endl;
+	  }
+	  sbd::BasisInitVector(W,adet,bdet,adet_comm_size,bdet_comm_size,
+	                       h_comm,b_comm,t_comm,init,seed);
+	} else {
+	  if( mpi_rank == 0 ) {
+	    std::cout << "# initial vector source: explicit determinants" << std::endl;
+	    std::cout << "# initial alpha determinant bitstring: "
+	              << sbd_data.initial_adeterminant_bitstring << std::endl;
+	    if( has_initial_bdet ) {
+	      std::cout << "# initial beta determinant bitstring: "
+	                << sbd_data.initial_bdeterminant_bitstring << std::endl;
+	    } else {
+	      std::cout << "# initial beta determinant bitstring: same as alpha"
+	                << std::endl;
+	    }
+	  }
+	  const auto initial_adet = from_string_checked(
+	      sbd_data.initial_adeterminant_bitstring, bit_length,
+	      static_cast<size_t>(L));
+	  const auto initial_bdet = from_string_checked(
+	      has_initial_bdet ? sbd_data.initial_bdeterminant_bitstring
+	                       : sbd_data.initial_adeterminant_bitstring,
+	      bit_length,
+	      static_cast<size_t>(L));
+	  sbd::BasisInitVectorFromDeterminants(
+	      W,adet,bdet,adet_comm_size,bdet_comm_size,
+	      initial_adet,initial_bdet,b_comm);
+	}
       } else {
+	if( mpi_rank == 0 ) {
+	  std::cout << "# initial vector source: load" << std::endl;
+	  std::cout << "# load name: " << loadname << std::endl;
+	}
 	sbd::LoadWavefunction(loadname,adet,bdet,
 			      adet_comm_size,bdet_comm_size,
 			      h_comm,b_comm,t_comm,W);
@@ -522,7 +576,7 @@ namespace sbd {
 	}
 
 	auto time_start_davidson = std::chrono::high_resolution_clock::now();
-	sbd::BasisInitVector(W,adet,bdet,adet_comm_size,bdet_comm_size,h_comm,b_comm,t_comm,init,seed);
+	// W was initialized or loaded before Hamiltonian construction.
 #ifdef SBD_THRUST
 	if( method == 1 ) {
 		sbd::Davidson(hii, W, device_mult,
