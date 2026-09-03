@@ -1,6 +1,7 @@
 #include "sbd/caop/basic/expansion.h"
 #include "sbd/caop/basic/arithmetic.h"
 #include "sbd/caop/basic/helper.h"
+#include "sbd/caop/basic/loadmodel.h"
 
 #include <mpi.h>
 
@@ -253,6 +254,25 @@ void test_round_robin_pairs(int b_rank, int b_size,
   require_world(valid, "heatbath round-robin pair test failed", world);
 }
 
+void test_fermion_sign_broadcast(MPI_Comm h_comm, MPI_Comm b_comm,
+                                 MPI_Comm t_comm, MPI_Comm world) {
+  sbd::GeneralOp<double> hamiltonian;
+  bool fermion_sign = false;
+  sbd::load_GeneralOp_from_file(
+      "caop_fermion_hamiltonian.txt", hamiltonian, fermion_sign,
+      h_comm, b_comm, t_comm);
+  const auto lookup = sbd::caop::MakeHeatbathLookup<double>(
+      hamiltonian, 1, 64, [](double coefficient) { return coefficient; });
+  const double local_coefficient =
+      lookup.coefficients.empty() ? 0.0 : lookup.coefficients.front();
+  double coefficient = 0.0;
+  MPI_Allreduce(&local_coefficient, &coefficient, 1, MPI_DOUBLE,
+                MPI_SUM, h_comm);
+  require_world(fermion_sign && std::abs(coefficient + 1.0) < 1.0e-12,
+                "CAOP fermion sign was not applied during normal ordering",
+                world);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -287,6 +307,7 @@ int main(int argc, char** argv) {
     test_parent_truncation(world);
     test_complex_coefficient_lookup(world);
     test_round_robin_pairs(b_rank, b_size, b_comm, world);
+    test_fermion_sign_broadcast(h_comm, b_comm, t_comm, world);
     std::vector<std::size_t> all_parents;
     std::vector<double> all_coefficients;
     make_heisenberg_parents(all_parents, all_coefficients);

@@ -54,8 +54,10 @@ Below is an explanation of each command-line option.
   System size, i.e., the length of each bitstring.
 - `--bit_length` (int):  
   Number of bits stored in each `size_t` when representing a bitstring as a `std::vector<size_t>`.
-- `--fermionsign` (int):  
-  Set to `1` to include fermionic sign factors; set to `0` to ignore them.
+- The first non-comment line of `--hamfile` selects particle statistics:
+  a positive value means hard-core boson/spin statistics and a non-positive
+  value means fermionic statistics. This value controls both Hamiltonian
+  normal ordering and Hamiltonian application.
 - `--init` (int):  
   Specifies how to initial state is generated. Currently, only `0` (a random initial vector) is supported.
 - `--do_sort_basis` (int):  

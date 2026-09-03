@@ -69,11 +69,6 @@ namespace sbd {
 	if( std::string(argv[i]) == "--bit_length" ) {
 	  sbd_data.bit_length = std::atoi(argv[++i]);
 	}
-	if( std::string(argv[i]) == "--fermionsign" ) {
-	  if( std::atoi(argv[++i]) != 0 ) {
-	    sbd_data.sign = true;
-	  }
-	}
 	if( std::string(argv[i]) == "--init" ) {
 	  sbd_data.init = std::atoi(argv[++i]);
 	}
@@ -137,7 +132,6 @@ namespace sbd {
       std::cout << "# init method: " << sbd_data.init << std::endl;
       std::cout << "# system size: " << sbd_data.system_size << std::endl;
       std::cout << "# bit length: " << sbd_data.bit_length << std::endl;
-      std::cout << "# fermion sign: " << sbd_data.sign << std::endl;
       std::cout << "# do basis sort: " << sbd_data.do_sort_basis << std::endl;
       std::cout << "# do redistribution of basis: " << sbd_data.do_redist_basis << std::endl;
       if( sbd_data.carryover_type == 0 ) {
@@ -571,12 +565,15 @@ namespace sbd {
 		  << " sbd: start load Hamiltonian" << std::endl;
       }
       GeneralOp<ElemT> hamiltonian;
-      bool sign;
-      load_GeneralOp_from_file(hamiltonianfile,hamiltonian,sign,
+      bool hamiltonian_sign = false;
+      load_GeneralOp_from_file(hamiltonianfile,hamiltonian,hamiltonian_sign,
 			       h_comm,b_comm,t_comm);
       if( mpi_rank == 0 ) {
 	std::cout << " " << make_timestamp()
 		  << " sbd: end load Hamiltonian" << std::endl;
+	std::cout << " " << make_timestamp()
+		  << " sbd: fermion sign from Hamiltonian: "
+		  << hamiltonian_sign << std::endl;
       }
 #ifdef SBD_DEBUG
       if( mpi_rank_b == 0 && mpi_rank_t == 0 ) {
@@ -621,7 +618,9 @@ namespace sbd {
 	std::cout << " " << make_timestamp()
 		  << " sbd: end load basis" << std::endl;
       }
-      diag(comm,sbd_data,hamiltonian,basis,loadname,savename,
+      SBD effective_sbd_data(sbd_data);
+      effective_sbd_data.sign = hamiltonian_sign;
+      diag(comm,effective_sbd_data,hamiltonian,basis,loadname,savename,
 	   energy,co_basis);
 		 MPI_Comm_free(&h_comm); // my fix
 		 MPI_Comm_free(&t_comm); // my fix
