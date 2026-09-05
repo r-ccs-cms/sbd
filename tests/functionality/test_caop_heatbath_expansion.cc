@@ -2,6 +2,7 @@
 #include "sbd/caop/basic/arithmetic.h"
 #include "sbd/caop/basic/helper.h"
 #include "sbd/caop/basic/loadmodel.h"
+#include "sbd/framework/determinant_distribution_round_robin.h"
 
 #include <mpi.h>
 
@@ -106,41 +107,41 @@ void require_world(bool local_condition, const char* message, MPI_Comm comm) {
   if(!global_ok) throw std::runtime_error(message);
 }
 
-template <typename LookupCoeffT>
-void test_lookup_layout(
-    const sbd::caop::HeatbathLookup<LookupCoeffT>& lookup,
+template <typename FlatCoeffT>
+void test_flat_data_layout(
+    const sbd::GeneralOpFlatData<FlatCoeffT>& flat_data,
     MPI_Comm world) {
-  const std::size_t terms = lookup.coefficients.size();
-  bool valid = lookup.creation_masks.size() == terms &&
-               lookup.annihilation_masks.size() == terms &&
-               lookup.creation_counts.size() == terms &&
-               lookup.offsets.size() == terms + 1 &&
-               !lookup.offsets.empty() && lookup.offsets.front() == 0 &&
-               lookup.offsets.back() == lookup.orbitals.size();
+  const std::size_t terms = flat_data.coefficients.size();
+  bool valid = flat_data.creation_masks.size() == terms &&
+               flat_data.annihilation_masks.size() == terms &&
+               flat_data.creation_counts.size() == terms &&
+               flat_data.offsets.size() == terms + 1 &&
+               !flat_data.offsets.empty() && flat_data.offsets.front() == 0 &&
+               flat_data.offsets.back() == flat_data.orbitals.size();
   for(std::size_t term = 0; valid && term < terms; ++term) {
-    valid = lookup.offsets[term] <= lookup.offsets[term + 1] &&
-            lookup.creation_counts[term] <=
-                lookup.offsets[term + 1] - lookup.offsets[term] &&
+    valid = flat_data.offsets[term] <= flat_data.offsets[term + 1] &&
+            flat_data.creation_counts[term] <=
+                flat_data.offsets[term + 1] - flat_data.offsets[term] &&
             (term == 0 ||
-             std::abs(lookup.coefficients[term - 1]) >=
-                 std::abs(lookup.coefficients[term]));
+             std::abs(flat_data.coefficients[term - 1]) >=
+                 std::abs(flat_data.coefficients[term]));
     std::vector<std::size_t> creation(
-        lookup.creation_masks[term].size(), 0);
+        flat_data.creation_masks[term].size(), 0);
     std::vector<std::size_t> annihilation(
-        lookup.annihilation_masks[term].size(), 0);
+        flat_data.annihilation_masks[term].size(), 0);
     const std::size_t middle =
-        lookup.offsets[term] + lookup.creation_counts[term];
-    for(std::size_t index = lookup.offsets[term];
-        index < lookup.offsets[term + 1]; ++index) {
+        flat_data.offsets[term] + flat_data.creation_counts[term];
+    for(std::size_t index = flat_data.offsets[term];
+        index < flat_data.offsets[term + 1]; ++index) {
       const std::size_t site =
-          static_cast<std::size_t>(lookup.orbitals[index]);
+          static_cast<std::size_t>(flat_data.orbitals[index]);
       auto& mask = index < middle ? creation : annihilation;
       mask[site / 64] |= std::size_t(1) << (site % 64);
     }
-    valid = valid && creation == lookup.creation_masks[term] &&
-            annihilation == lookup.annihilation_masks[term];
+    valid = valid && creation == flat_data.creation_masks[term] &&
+            annihilation == flat_data.annihilation_masks[term];
   }
-  require_world(valid, "heatbath flat lookup layout test failed", world);
+  require_world(valid, "GeneralOp flat data layout test failed", world);
 }
 
 void test_cutoff_boundary(int h_rank, int b_rank,
@@ -155,10 +156,10 @@ void test_cutoff_boundary(int h_rank, int b_rank,
   }
   sbd::GeneralOp<double> hamiltonian;
   if(h_rank == 0) hamiltonian += 0.5 * sbd::Cr(1) * sbd::An(0);
-  const auto lookup = sbd::caop::MakeHeatbathLookup<double>(
+  const auto flat_data = sbd::MakeKetSideGeneralOpFlatData<double>(
       hamiltonian, 1, 64,
       [](double coefficient) { return std::abs(coefficient); });
-  test_lookup_layout(lookup, world);
+  test_flat_data_layout(flat_data, world);
 
   const double equal = 0.25;
   const double cutoffs[] = {
@@ -170,7 +171,7 @@ void test_cutoff_boundary(int h_rank, int b_rank,
     sbd::caop::HeatbathExpansionStats stats;
     sbd::caop::HeatbathExpansionProfile profile;
     sbd::caop::HeatbathExpansion(
-        parents, coefficients, lookup, cutoffs[test], 1, candidates,
+        parents, coefficients, flat_data, cutoffs[test], 1, candidates,
         h_comm, t_comm, world, &stats, &profile);
     std::size_t local_count = candidates.size();
     std::size_t global_count = 0;
@@ -207,13 +208,13 @@ void test_complex_coefficient_lookup(MPI_Comm world) {
   const Complex coefficient(-0.25, 0.75);
   sbd::GeneralOp<Complex> hamiltonian;
   hamiltonian += coefficient * sbd::Cr(1) * sbd::An(0);
-  const auto lookup = sbd::caop::MakeHeatbathLookup<Complex>(
+  const auto flat_data = sbd::MakeKetSideGeneralOpFlatData<Complex>(
       hamiltonian, 1, 64,
       [](const Complex& value) { return value; });
-  test_lookup_layout(lookup, world);
-  require_world(lookup.coefficients.size() == 1 &&
-                    lookup.coefficients[0] == coefficient,
-                "complex heatbath lookup coefficient was not preserved",
+  test_flat_data_layout(flat_data, world);
+  require_world(flat_data.coefficients.size() == 1 &&
+                    flat_data.coefficients[0] == coefficient,
+                "complex GeneralOp flat coefficient was not preserved",
                 world);
 }
 
@@ -230,7 +231,8 @@ void test_round_robin_pairs(int b_rank, int b_size,
     parents[index - begin][0] = index + 1;
     coefficients[index - begin] = all_coefficients[index];
   }
-  sbd::caop::RedistributeHeatbathParents(parents, coefficients, b_comm);
+  sbd::redistribute_determinants_weight_round_robin(
+      parents, coefficients, b_comm);
 
   std::vector<std::size_t> ranking(all_coefficients.size());
   std::iota(ranking.begin(), ranking.end(), 0);
@@ -261,10 +263,10 @@ void test_fermion_sign_broadcast(MPI_Comm h_comm, MPI_Comm b_comm,
   sbd::load_GeneralOp_from_file(
       "caop_fermion_hamiltonian.txt", hamiltonian, fermion_sign,
       h_comm, b_comm, t_comm);
-  const auto lookup = sbd::caop::MakeHeatbathLookup<double>(
+  const auto flat_data = sbd::MakeKetSideGeneralOpFlatData<double>(
       hamiltonian, 1, 64, [](double coefficient) { return coefficient; });
   const double local_coefficient =
-      lookup.coefficients.empty() ? 0.0 : lookup.coefficients.front();
+      flat_data.coefficients.empty() ? 0.0 : flat_data.coefficients.front();
   double coefficient = 0.0;
   MPI_Allreduce(&local_coefficient, &coefficient, 1, MPI_DOUBLE,
                 MPI_SUM, h_comm);
@@ -321,17 +323,18 @@ int main(int argc, char** argv) {
       coefficients[index - parent_begin] = all_coefficients[index];
     }
     if(geometry.distribution == 1)
-      sbd::caop::RedistributeHeatbathParents(parents, coefficients, b_comm);
+      sbd::redistribute_determinants_weight_round_robin(
+          parents, coefficients, b_comm);
 
     const auto hamiltonian = distribute_terms(
         make_heisenberg_terms(), h_rank, geometry.h);
-    const auto lookup = sbd::caop::MakeHeatbathLookup<double>(
+    const auto flat_data = sbd::MakeKetSideGeneralOpFlatData<double>(
         hamiltonian, 1, 64,
         [](double coefficient) { return std::abs(coefficient); });
-    test_lookup_layout(lookup, world);
+    test_flat_data_layout(flat_data, world);
     sbd::det_vector<std::size_t> candidates;
     constexpr double cutoff = 0.12;
-    sbd::caop::HeatbathExpansion(parents, coefficients, lookup,
+    sbd::caop::HeatbathExpansion(parents, coefficients, flat_data,
                                  cutoff, 3, candidates,
                                  h_comm, t_comm, world);
 

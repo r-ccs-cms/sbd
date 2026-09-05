@@ -130,13 +130,13 @@ void compare_expansion(
     coefficients.push_back(parent % 2 == 0 ? magnitude : -magnitude);
   }
 
-  const auto lookup = sbd::caop::MakeHeatbathLookup<double>(
+  const auto flat_data = sbd::MakeKetSideGeneralOpFlatData<double>(
       hamiltonian, 1, bit_length,
       [](double coefficient) { return std::abs(coefficient); });
   for(const double cutoff : {0.2, 0.6}) {
     sbd::det_vector<std::size_t> ca_op_candidates;
     sbd::caop::HeatbathExpansion(
-        ca_op_parents, coefficients, lookup, cutoff, 7,
+        ca_op_parents, coefficients, flat_data, cutoff, 7,
         ca_op_candidates, comm, comm, comm);
     const auto ca_op_keys = candidate_keys(ca_op_candidates, sites, false);
     for(int gdb_type = 0; gdb_type <= 1; ++gdb_type) {

@@ -7,6 +7,7 @@
 
 #include "sbd/framework/timestamp.h"
 #include "sbd/framework/determinant_initialization.h"
+#include "sbd/framework/determinant_distribution_round_robin.h"
 #include "sbd/caop/basic/expansion.h"
 
 namespace sbd {
@@ -185,7 +186,8 @@ namespace sbd {
         const double truncation_seconds = MPI_Wtime() - truncation_start;
         const double redistribution_start = MPI_Wtime();
         if( sbd_data.heatbath_parent_distribution == 1 )
-          RedistributeHeatbathParents(parents,coefficients,b_comm);
+          redistribute_determinants_weight_round_robin(
+              parents,coefficients,b_comm);
         const double parent_redistribution_seconds =
             MPI_Wtime() - redistribution_start;
 
@@ -194,16 +196,16 @@ namespace sbd {
         const size_t determinant_words =
             (sbd_data.system_size + sbd_data.bit_length - 1) /
             sbd_data.bit_length;
-        using RealT = detail::magnitude_type<ElemT>;
+        using RealT = typename GetRealType<ElemT>::RealT;
         const double lookup_start = MPI_Wtime();
-        const auto lookup = MakeHeatbathLookup<RealT>(
+        const auto flat_data = MakeKetSideGeneralOpFlatData<RealT>(
             hamiltonian,determinant_words,sbd_data.bit_length,
             [](const ElemT & coefficient) -> RealT {
               return std::abs(coefficient);
             });
         const double lookup_seconds = MPI_Wtime() - lookup_start;
         HeatbathCarryoverResult result;
-        HeatbathExpansion(parents,coefficients,lookup,
+        HeatbathExpansion(parents,coefficients,flat_data,
                           sbd_data.heatbath_cutoff,
                           sbd_data.heatbath_batch_size,
                           carryover_basis,h_comm,t_comm,comm,

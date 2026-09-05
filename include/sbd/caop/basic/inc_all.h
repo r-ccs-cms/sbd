@@ -3,6 +3,7 @@
 
 #include "sbd/caop/basic/basis.h"
 #include "sbd/caop/basic/generalop.h"
+#include "sbd/caop/basic/generalop_flatdata.h"
 #include "sbd/caop/basic/arithmetic.h"
 #include "sbd/caop/basic/loadmodel.h"
 #include "sbd/caop/basic/helper.h"
