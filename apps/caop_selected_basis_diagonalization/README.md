@@ -54,14 +54,46 @@ Below is an explanation of each command-line option.
   System size, i.e., the length of each bitstring.
 - `--bit_length` (int):  
   Number of bits stored in each `size_t` when representing a bitstring as a `std::vector<size_t>`.
-- `--fermionsign` (int):  
-  Set to `1` to include fermionic sign factors; set to `0` to ignore them.
+- The first non-comment line of `--hamfile` selects particle statistics:
+  a positive value means hard-core boson/spin statistics and a non-positive
+  value means fermionic statistics. This value controls both Hamiltonian
+  normal ordering and Hamiltonian application.
 - `--init` (int):  
   Specifies how to initial state is generated. Currently, only `0` (a random initial vector) is supported.
 - `--do_sort_basis` (int):  
   Set to `1` to sort the bitstrings loaded from `basisfiles` across all nodes. This is manly used when the input files contain overlapping bitstrings. Set to `0` if sorting is unnecessary.
 - `--do_redist_basis` (int):  
   Set to `1` to redistribute the bitstrings from `basisfiles` uniformly across the nodes specified by `b_comm_size`. Set to `0` if redistribution is unnecessary. Note: If `--sort_basis` is set to `1`, uniform redistribution is performed automatically, and this option is ignored.
+- `--carryover_type` (int):
+  Selects the basis returned after diagonalization. `0` disables carryover,
+  `1` retains the largest-weight fraction, and `2` performs deterministic
+  CAOP Heatbath expansion.
+- `--carryover_ratio` (float):
+  For `--carryover_type 1`, the fraction of basis states retained by global
+  wavefunction-weight ranking.
+- `--heatbath_cutoff` (float):
+  For `--carryover_type 2`, accepts a non-diagonal Hamiltonian term when
+  `|a_k c_j| > heatbath_cutoff` (default: `1.0e-4`). Parents surviving the
+  optional truncation are retained unconditionally.
+- `--heatbath_truncation` (float):
+  Removes an expansion parent unless
+  `|c_j|^2 > heatbath_truncation` (default: `0.0`).
+- `--heatbath_batch_size` (int):
+  Maximum aggregate candidate batch size per MPI rank before local
+  sort/unique merging (default: `1000000`).
+- `--heatbath_parent_distribution` (int):
+  Selects the parent layout used only during expansion. `0` preserves the
+  native basis distribution; `1` redistributes parents by descending
+  `|c_j|` rank in round-robin order over `b_comm` (default: `1`). The original
+  basis and wavefunction ordering used by diagonalization and saving are not
+  modified.
+
+For deterministic Heatbath carryover, the application reports the final
+global candidate count separately from expansion statistics and phase timings.
+Statistics are summed over all MPI ranks. Timings are the maximum elapsed time
+over all ranks and are reported for parent truncation, parent redistribution,
+lookup construction, local generation, global sort/unique, final
+redistribution, and the complete carryover operation.
 
 ---
 

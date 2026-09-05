@@ -7,6 +7,8 @@
 
 #include "sbd/framework/timestamp.h"
 #include "sbd/framework/determinant_initialization.h"
+#include "sbd/framework/determinant_distribution_round_robin.h"
+#include "sbd/caop/basic/expansion.h"
 
 namespace sbd {
   namespace caop {
@@ -30,7 +32,12 @@ namespace sbd {
       bool sign = false;
       bool do_sort_basis = false;
       bool do_redist_basis = false;
+      int carryover_type = 0;
       double ratio = 0.0;
+      double heatbath_cutoff = 1.0e-4;
+      double heatbath_truncation = 0.0;
+      size_t heatbath_batch_size = 1000000;
+      int heatbath_parent_distribution = 1;
     };
 
     SBD generate_sbd_data(int argc, char * argv[]) {
@@ -63,11 +70,6 @@ namespace sbd {
 	if( std::string(argv[i]) == "--bit_length" ) {
 	  sbd_data.bit_length = std::atoi(argv[++i]);
 	}
-	if( std::string(argv[i]) == "--fermionsign" ) {
-	  if( std::atoi(argv[++i]) != 0 ) {
-	    sbd_data.sign = true;
-	  }
-	}
 	if( std::string(argv[i]) == "--init" ) {
 	  sbd_data.init = std::atoi(argv[++i]);
 	}
@@ -87,6 +89,24 @@ namespace sbd {
 	  if( std::atoi(argv[++i]) != 0 ) {
 	    sbd_data.do_redist_basis = true;
 	  }
+	}
+	if( std::string(argv[i]) == "--carryover_type" ) {
+	  sbd_data.carryover_type = std::atoi(argv[++i]);
+	}
+	if( std::string(argv[i]) == "--carryover_ratio" ) {
+	  sbd_data.ratio = std::atof(argv[++i]);
+	}
+	if( std::string(argv[i]) == "--heatbath_cutoff" ) {
+	  sbd_data.heatbath_cutoff = std::atof(argv[++i]);
+	}
+	if( std::string(argv[i]) == "--heatbath_truncation" ) {
+	  sbd_data.heatbath_truncation = std::atof(argv[++i]);
+	}
+	if( std::string(argv[i]) == "--heatbath_batch_size" ) {
+	  sbd_data.heatbath_batch_size = std::stoull(argv[++i]);
+	}
+	if( std::string(argv[i]) == "--heatbath_parent_distribution" ) {
+	  sbd_data.heatbath_parent_distribution = std::atoi(argv[++i]);
 	}
       }
       return sbd_data;
@@ -113,11 +133,100 @@ namespace sbd {
       std::cout << "# init method: " << sbd_data.init << std::endl;
       std::cout << "# system size: " << sbd_data.system_size << std::endl;
       std::cout << "# bit length: " << sbd_data.bit_length << std::endl;
-      std::cout << "# fermion sign: " << sbd_data.sign << std::endl;
       std::cout << "# do basis sort: " << sbd_data.do_sort_basis << std::endl;
       std::cout << "# do redistribution of basis: " << sbd_data.do_redist_basis << std::endl;
-      std::cout << "# carryover ratio: " << sbd_data.ratio << std::endl;
+      if( sbd_data.carryover_type == 0 ) {
+	std::cout << "# carryover type: none" << std::endl;
+      } else if( sbd_data.carryover_type == 1 ) {
+	std::cout << "# carryover type: weight truncation" << std::endl;
+	std::cout << "# carryover ratio: " << sbd_data.ratio << std::endl;
+      } else if( sbd_data.carryover_type == 2 ) {
+	std::cout << "# carryover type: deterministic heatbath expansion" << std::endl;
+	std::cout << "# heatbath cutoff: " << sbd_data.heatbath_cutoff << std::endl;
+	std::cout << "# heatbath truncation: " << sbd_data.heatbath_truncation << std::endl;
+	std::cout << "# heatbath batch size per rank: " << sbd_data.heatbath_batch_size << std::endl;
+	std::cout << "# heatbath parent distribution: "
+	          << sbd_data.heatbath_parent_distribution << std::endl;
+      }
     }
+
+    namespace detail {
+      struct HeatbathCarryoverResult {
+        size_t candidate_count = 0;
+        HeatbathExpansionStats stats;
+        HeatbathExpansionProfile expansion_profile;
+        double truncation_seconds = 0.0;
+        double parent_redistribution_seconds = 0.0;
+        double lookup_seconds = 0.0;
+        double total_seconds = 0.0;
+      };
+
+      template <typename ElemT>
+      HeatbathCarryoverResult make_heatbath_carryover(
+          const SBD & sbd_data,
+          const GeneralOp<ElemT> & hamiltonian,
+          const det_vector<size_t> & basis,
+          const std::vector<ElemT> & wavefunction,
+          det_vector<size_t> & carryover_basis,
+          MPI_Comm h_comm,
+          MPI_Comm b_comm,
+          MPI_Comm t_comm,
+          MPI_Comm comm) {
+        const double total_start = MPI_Wtime();
+        if( sbd_data.heatbath_parent_distribution != 0 &&
+            sbd_data.heatbath_parent_distribution != 1 )
+          throw std::invalid_argument(
+              "heatbath parent distribution must be 0 (native) or 1 (round-robin)");
+
+        det_vector<size_t> parents(basis);
+        std::vector<ElemT> coefficients(wavefunction);
+        const double truncation_start = MPI_Wtime();
+        TruncateHeatbathParents(parents,coefficients,
+                                sbd_data.heatbath_truncation);
+        const double truncation_seconds = MPI_Wtime() - truncation_start;
+        const double redistribution_start = MPI_Wtime();
+        if( sbd_data.heatbath_parent_distribution == 1 )
+          redistribute_determinants_weight_round_robin(
+              parents,coefficients,b_comm);
+        const double parent_redistribution_seconds =
+            MPI_Wtime() - redistribution_start;
+
+        if( sbd_data.bit_length == 0 )
+          throw std::invalid_argument("bit length must be nonzero");
+        const size_t determinant_words =
+            (sbd_data.system_size + sbd_data.bit_length - 1) /
+            sbd_data.bit_length;
+        using RealT = typename GetRealType<ElemT>::RealT;
+        const double lookup_start = MPI_Wtime();
+        const auto flat_data = MakeKetSideGeneralOpFlatData<RealT>(
+            hamiltonian,determinant_words,sbd_data.bit_length,
+            [](const ElemT & coefficient) -> RealT {
+              return std::abs(coefficient);
+            });
+        const double lookup_seconds = MPI_Wtime() - lookup_start;
+        HeatbathCarryoverResult result;
+        HeatbathExpansion(parents,coefficients,flat_data,
+                          sbd_data.heatbath_cutoff,
+                          sbd_data.heatbath_batch_size,
+                          carryover_basis,h_comm,t_comm,comm,
+                          &result.stats,&result.expansion_profile);
+
+        size_t local_count = carryover_basis.size();
+        MPI_Allreduce(&local_count,&result.candidate_count,1,
+                      SBD_MPI_SIZE_T,MPI_SUM,comm);
+        const double local_timings[4] = {
+            truncation_seconds, parent_redistribution_seconds,
+            lookup_seconds, MPI_Wtime() - total_start};
+        double maximum_timings[4] = {};
+        MPI_Allreduce(local_timings,maximum_timings,4,
+                      MPI_DOUBLE,MPI_MAX,comm);
+        result.truncation_seconds = maximum_timings[0];
+        result.parent_redistribution_seconds = maximum_timings[1];
+        result.lookup_seconds = maximum_timings[2];
+        result.total_seconds = maximum_timings[3];
+        return result;
+      }
+    } // namespace detail
     
     template <typename ElemT>
     void diag(const MPI_Comm & comm,
@@ -346,7 +455,7 @@ namespace sbd {
 	energy = GetReal(E);
       }
 
-      if( sbd_data.ratio != 0.0 ) {
+      if( sbd_data.carryover_type == 1 ) {
 	if( mpi_rank == 0 ) {
 	  std::cout << " " << make_timestamp()
 		    << " sbd: start carryover selection" << std::endl;
@@ -358,6 +467,42 @@ namespace sbd {
 	  std::cout << " " << make_timestamp()
 		    << " sbd: end carryover selection" << std::endl;
 	}
+      } else if( sbd_data.carryover_type == 2 ) {
+	if( mpi_rank == 0 ) {
+	  std::cout << " " << make_timestamp()
+		    << " sbd: start deterministic heatbath expansion" << std::endl;
+	}
+	const auto heatbath_result = detail::make_heatbath_carryover(
+	    sbd_data,H,basis,W,co_basis,h_comm,b_comm,t_comm,comm);
+	if( mpi_rank == 0 ) {
+	  std::cout << " " << make_timestamp()
+	            << " sbd: heatbath candidate count: "
+	            << heatbath_result.candidate_count << std::endl;
+	  std::cout << " " << make_timestamp()
+	            << " sbd: heatbath expansion stats: parents="
+	            << heatbath_result.stats.parents
+	            << " terms_visited=" << heatbath_result.stats.terms_visited
+	            << " mask_rejections=" << heatbath_result.stats.mask_rejections
+	            << " accepted_before_unique="
+	            << heatbath_result.stats.accepted_before_unique << std::endl;
+	  std::cout << " " << make_timestamp()
+	            << " sbd: heatbath expansion profile seconds: truncation="
+	            << heatbath_result.truncation_seconds
+	            << " parent_redistribution="
+	            << heatbath_result.parent_redistribution_seconds
+	            << " lookup=" << heatbath_result.lookup_seconds
+	            << " generation="
+	            << heatbath_result.expansion_profile.generation_seconds
+	            << " global_sort_unique="
+	            << heatbath_result.expansion_profile.global_sort_unique_seconds
+	            << " redistribution="
+	            << heatbath_result.expansion_profile.redistribution_seconds
+	            << " total=" << heatbath_result.total_seconds << std::endl;
+	  std::cout << " " << make_timestamp()
+		    << " sbd: end deterministic heatbath expansion" << std::endl;
+	}
+      } else if( sbd_data.carryover_type != 0 ) {
+	throw std::invalid_argument("unknown CAOP carryover type");
       }
 
       /**
@@ -422,12 +567,15 @@ namespace sbd {
 		  << " sbd: start load Hamiltonian" << std::endl;
       }
       GeneralOp<ElemT> hamiltonian;
-      bool sign;
-      load_GeneralOp_from_file(hamiltonianfile,hamiltonian,sign,
+      bool hamiltonian_sign = false;
+      load_GeneralOp_from_file(hamiltonianfile,hamiltonian,hamiltonian_sign,
 			       h_comm,b_comm,t_comm);
       if( mpi_rank == 0 ) {
 	std::cout << " " << make_timestamp()
 		  << " sbd: end load Hamiltonian" << std::endl;
+	std::cout << " " << make_timestamp()
+		  << " sbd: fermion sign from Hamiltonian: "
+		  << hamiltonian_sign << std::endl;
       }
 #ifdef SBD_DEBUG
       if( mpi_rank_b == 0 && mpi_rank_t == 0 ) {
@@ -472,7 +620,9 @@ namespace sbd {
 	std::cout << " " << make_timestamp()
 		  << " sbd: end load basis" << std::endl;
       }
-      diag(comm,sbd_data,hamiltonian,basis,loadname,savename,
+      SBD effective_sbd_data(sbd_data);
+      effective_sbd_data.sign = hamiltonian_sign;
+      diag(comm,effective_sbd_data,hamiltonian,basis,loadname,savename,
 	   energy,co_basis);
 		 MPI_Comm_free(&h_comm); // my fix
 		 MPI_Comm_free(&t_comm); // my fix

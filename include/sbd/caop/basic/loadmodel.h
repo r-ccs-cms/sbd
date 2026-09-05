@@ -86,6 +86,7 @@ namespace sbd {
     int mpi_rank_t; MPI_Comm_rank(t_comm,&mpi_rank_t);
     int mpi_size_t; MPI_Comm_size(t_comm,&mpi_size_t);
     size_t max_buffer_size = 1000000;
+    int sign_value = 0;
 
     if( mpi_rank_t == 0 ) {
       if( mpi_rank_b == 0 ) {
@@ -120,8 +121,7 @@ namespace sbd {
 	      }
 	      statistics_set = true;
 	      
-	      if( statistics > 0 ) { sign = false; }
-	      else                 { sign = true; }
+	      sign_value = statistics > 0 ? 0 : 1;
 	      
 	      continue;
 	    }
@@ -252,12 +252,17 @@ namespace sbd {
 	    op += recv_op;
 	  }
 	}
+        MPI_Bcast(&sign_value,1,MPI_INT,0,h_comm);
+        sign = sign_value != 0;
+        NormalOrdering(op,sign);
+        Simplify(op);
       }
-      NormalOrdering(op,sign);
-      Simplify(op);
       MpiBcast(op,0,b_comm);
+      MPI_Bcast(&sign_value,1,MPI_INT,0,b_comm);
     }
     MpiBcast(op,0,t_comm);
+    MPI_Bcast(&sign_value,1,MPI_INT,0,t_comm);
+    sign = sign_value != 0;
   }
 
   template <typename ElemT>
