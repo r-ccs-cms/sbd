@@ -7,6 +7,8 @@
 #ifndef SBD_FRAMEWORK_MPI_UTILITY_H
 #define SBD_FRAMEWORK_MPI_UTILITY_H
 
+#include "sbd/framework/type_def.h"
+
 #include <type_traits>
 #include <limits>
 #include <stdexcept>

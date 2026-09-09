@@ -1,0 +1,9 @@
+gdb-stat-evaluator
+gdb-stat-evaluator-uhf
+*.d
+tests/test_*
+!tests/*.cc
+!tests/*.sh
+tests/make_cli_fixture
+tests/make_cli_fixture_uhf
+tests/check_checkpoint_against_exact

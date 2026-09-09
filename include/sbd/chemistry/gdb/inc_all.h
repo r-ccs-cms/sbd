@@ -23,4 +23,9 @@
 #include "sbd/chemistry/gdb/expansion.h"
 #include "sbd/chemistry/gdb/sbdiag.h"
 
+#ifndef SBD_THRUST
+#include "sbd/chemistry/gdb/stat_evaluator.h"
+#include "sbd/chemistry/gdb/exact_external_observable.h"
+#endif
+
 #endif

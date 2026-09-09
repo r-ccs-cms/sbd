@@ -5,6 +5,8 @@
 #ifndef SBD_CHEMISTRY_GDB_EXPANSION_H
 #define SBD_CHEMISTRY_GDB_EXPANSION_H
 
+#include "sbd/chemistry/gdb/heatbath_lookup.h"
+
 #include <algorithm>
 #include <cmath>
 #include <iterator>
@@ -53,123 +55,6 @@ namespace sbd {
 
     namespace detail {
 
-      template <typename RealT>
-      struct IntegralDoubleExcitation {
-        int created_first;
-        int created_second;
-        RealT abs_integral;
-      };
-
-      template <typename ElemT, typename RealT>
-      class IntegralDoubleExcitationLookup {
-      public:
-        using entry_type = IntegralDoubleExcitation<RealT>;
-        using const_iterator = typename std::vector<entry_type>::const_iterator;
-
-        IntegralDoubleExcitationLookup(size_t norb,
-                                       const twoInt<ElemT> & I2,
-                                       RealT cutoff,
-                                       RealT max_abs_coefficient)
-          : norb_(norb) {
-          if( norb_ == 0 ) {
-            throw std::invalid_argument("number of orbitals must be positive");
-          }
-          if( cutoff < RealT(0) ) {
-            throw std::invalid_argument("heatbath cutoff must be non-negative");
-          }
-
-          const size_t nso = 2 * norb_;
-          const size_t num_pairs = nso * (nso - 1) / 2;
-          pair_offsets_.assign(num_pairs + 1, 0);
-          if( max_abs_coefficient == RealT(0) ) return;
-
-          for(size_t j=1; j < nso; ++j) {
-            for(size_t i=0; i < j; ++i) {
-              size_t count = 0;
-              for(size_t b=1; b < nso; ++b) {
-                for(size_t a=0; a < b; ++a) {
-                  if( a == i || a == j || b == i || b == j ) continue;
-                  const RealT abs_integral = std::abs(
-                    I2.Value(static_cast<int>(a),static_cast<int>(i),
-                             static_cast<int>(b),static_cast<int>(j))
-                    - I2.Value(static_cast<int>(a),static_cast<int>(j),
-                               static_cast<int>(b),static_cast<int>(i)));
-                  if( abs_integral * max_abs_coefficient > cutoff ) ++count;
-                }
-              }
-              const size_t pair = pair_index(i,j);
-              pair_offsets_[pair+1] = count;
-            }
-          }
-          for(size_t pair=0; pair < num_pairs; ++pair) {
-            pair_offsets_[pair+1] += pair_offsets_[pair];
-          }
-
-          entries_.resize(pair_offsets_.back());
-          for(size_t j=1; j < nso; ++j) {
-            for(size_t i=0; i < j; ++i) {
-              const size_t pair = pair_index(i,j);
-              size_t position = pair_offsets_[pair];
-              for(size_t b=1; b < nso; ++b) {
-                for(size_t a=0; a < b; ++a) {
-                  if( a == i || a == j || b == i || b == j ) continue;
-                  const RealT abs_integral = std::abs(
-                    I2.Value(static_cast<int>(a),static_cast<int>(i),
-                             static_cast<int>(b),static_cast<int>(j))
-                    - I2.Value(static_cast<int>(a),static_cast<int>(j),
-                               static_cast<int>(b),static_cast<int>(i)));
-                  if( abs_integral * max_abs_coefficient > cutoff ) {
-                    entries_[position++] = {
-                      static_cast<int>(a),static_cast<int>(b),abs_integral};
-                  }
-                }
-              }
-              std::sort(entries_.begin() + pair_offsets_[pair],
-                        entries_.begin() + pair_offsets_[pair+1],
-                        [](const entry_type & lhs, const entry_type & rhs) {
-                          return lhs.abs_integral > rhs.abs_integral;
-                        });
-            }
-          }
-        }
-
-        const_iterator begin(int first, int second) const {
-          const size_t pair = checked_pair_index(first,second);
-          return entries_.begin() + pair_offsets_[pair];
-        }
-
-        const_iterator end(int first, int second) const {
-          const size_t pair = checked_pair_index(first,second);
-          return entries_.begin() + pair_offsets_[pair+1];
-        }
-
-        size_t entry_count() const noexcept { return entries_.size(); }
-        size_t storage_bytes() const noexcept {
-          return pair_offsets_.size() * sizeof(size_t)
-            + entries_.size() * sizeof(entry_type);
-        }
-
-      private:
-        static size_t pair_index(size_t first, size_t second) noexcept {
-          return second * (second - 1) / 2 + first;
-        }
-
-        size_t checked_pair_index(int first, int second) const {
-          const int nso = static_cast<int>(2*norb_);
-          if( first < 0 || second < 0 || first == second
-              || first >= nso || second >= nso ) {
-            throw std::out_of_range("invalid annihilation pair");
-          }
-          if( first > second ) std::swap(first,second);
-          return pair_index(static_cast<size_t>(first),
-                            static_cast<size_t>(second));
-        }
-
-        size_t norb_;
-        std::vector<size_t> pair_offsets_;
-        std::vector<entry_type> entries_;
-      };
-
       template <typename ElemT, typename RealT>
       void local_heatbath_expansion_integral(
           const sbd::det_vector<size_t> & det,
@@ -197,7 +82,7 @@ namespace sbd {
           max_abs_coefficient = std::max(max_abs_coefficient,
                                          std::abs(coefficient));
         }
-        IntegralDoubleExcitationLookup<ElemT,RealT> lookup(
+        HeatbathLookup<ElemT,RealT> lookup(
           norb,I2,cutoff,max_abs_coefficient);
 
         constexpr size_t automatic_batch_size = 1000000;

@@ -5,6 +5,9 @@
 #ifndef SBD_CHEMISTRY_BASIC_INTEGRALS_H
 #define SBD_CHEMISTRY_BASIC_INTEGRALS_H
 
+#include <algorithm>
+#include <vector>
+
 namespace sbd {
 
   template <typename ElemT>
