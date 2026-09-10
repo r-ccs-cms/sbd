@@ -147,6 +147,47 @@ IDs and mismatched observable, sample count, cutoff, or reference energy.
 Use a calculation ID only for compatible runs of the same wavefunction; input
 identity is not checked by the summary script.
 
+### Aggregate profile and timing logs
+
+Capture standard output when running the evaluator, then pass one or more logs
+alongside the result CSVs:
+
+```sh
+perl ./summarize-batches.pl --output summary.csv \
+  --log run-a.log --log run-b.log \
+  --profile-output diagnostics.csv --rank-output rank-values.csv \
+  batches-a.csv batches-b.csv
+```
+
+`summary.csv` keeps the existing numerical result format. The additional outputs
+use long-form CSV rows:
+
+- `diagnostics.csv`: one row per calculation, batch, kind (`profile`/`timing`),
+  and metric, with rank count, minimum, mean, maximum, and `max_over_mean`.
+  The ratio is blank when every value is zero. These statistics compare ranks
+  within each batch; they do not average different batches together.
+- Optional `rank-values.csv`: the original per-rank metric values, with
+  calculation ID, batch ID, rank, and host. It supports subsequent grouping by
+  host or inspection of individual ranks.
+
+The parser uses rank rows, ignoring precomputed `profile_summary` and
+`timing_summary` lines. Keep the `# calculation ID:` and `# MPI size:` metadata
+in each log. Both profile and timing must have all ranks for every included
+batch; duplicate rows, incomplete batches, invalid numbers, and inconsistent
+counts are rejected. Older logs without rank rows are not supported by this mode.
+
+When CSVs are supplied, every log batch must match a CSV row, its MPI size, and
+its total number of draws. CSV batches without a corresponding log are allowed.
+The CSV's elapsed total still sums the root times; rank maxima are available in
+the diagnostic `timing,total` rows. Log-only analysis is also supported:
+
+```sh
+perl ./summarize-batches.pl --log run.log --profile-output diagnostics.csv
+```
+
+`--profile-output` is required with `--log`; `--rank-output` is optional. Each
+output must use a distinct path. No changes to C++ log generation are required.
+
 ## Rank profiles
 
 Each batch also writes `sbd::stats: profile` lines to standard output, one per

@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
 
 ranks=${1:-1}
 evaluator=${2:-./gdb-stat-evaluator}
@@ -73,3 +74,13 @@ END {
 echo "gdb stat evaluator rank profiles ($ranks ranks): PASS"
 
 test "$(grep -c 'sbd::stats: timing_summary batch_id=' "$fixture_dir/stdout.txt")" = 24
+
+perl "$script_dir/../summarize-batches.pl" \
+  --output "$fixture_dir/summary.csv" \
+  --log "$fixture_dir/stdout.txt" \
+  --profile-output "$fixture_dir/diagnostics.csv" \
+  --rank-output "$fixture_dir/rank-values.csv" "$fixture_dir/result.csv"
+test "$(wc -l < "$fixture_dir/diagnostics.csv" | tr -d ' ')" = 45
+test "$(wc -l < "$fixture_dir/rank-values.csv" | tr -d ' ')" = "$((1 + 44 * ranks))"
+grep -q '^cli-fixture,7,timing,total,' "$fixture_dir/diagnostics.csv"
+echo "gdb stat evaluator log aggregation ($ranks ranks): PASS"

@@ -21,9 +21,9 @@ TESTS += tests/test_gdb_stat_evaluator
 all: gdb-stat-evaluator $(TESTS)
 uhf: gdb-stat-evaluator-uhf
 
-gdb-stat-evaluator: main.cc
+gdb-stat-evaluator: main.cc cli_options.h
 	$(CCCOM) $(CCFLAGS) $(DEPFLAGS) -MF $@.d $(INCLUDES) -o $@ $< $(SYSLIB)
-gdb-stat-evaluator-uhf: main.cc
+gdb-stat-evaluator-uhf: main.cc cli_options.h
 	$(CCCOM) $(CCFLAGS) -D_UHF $(DEPFLAGS) -MF $@.d $(INCLUDES) -o $@ $< $(SYSLIB)
 
 check: $(TESTS)

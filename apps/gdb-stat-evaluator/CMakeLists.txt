@@ -7,9 +7,9 @@ function(sbd_configure_stat target)
     $<$<BOOL:${SBD_TRADMODE}>:SBD_TRADMODE>)
 endfunction()
 
-add_executable(gdb-stat-evaluator main.cc)
+add_executable(gdb-stat-evaluator main.cc cli_options.h)
 sbd_configure_stat(gdb-stat-evaluator)
-add_executable(gdb-stat-evaluator-uhf main.cc)
+add_executable(gdb-stat-evaluator-uhf main.cc cli_options.h)
 target_compile_definitions(gdb-stat-evaluator-uhf PRIVATE _UHF)
 sbd_configure_stat(gdb-stat-evaluator-uhf)
 
