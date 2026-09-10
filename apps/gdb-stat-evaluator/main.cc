@@ -146,8 +146,11 @@ int main(int argc, char** argv) {
     if(rank == 0) {
       std::cerr << "error: " << error.what() << '\n';
       gdb_stat_evaluator::print_usage(std::cerr);
+    } else {
+      std::cerr << "error on rank " << rank << ": " << error.what() << '\n';
     }
     exit_code = 1;
+    MPI_Abort(world, exit_code);
   }
 
   free_communicator(load_b_comm);

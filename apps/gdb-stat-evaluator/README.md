@@ -82,6 +82,11 @@ across all evaluator ranks. For example, 2 saved shards can be evaluated with
 | `--minimum-abs-denominator EPS` | `0`, nonnegative; reject PT2 denominators at or below this magnitude |
 | `--help`, `-h` | Print usage |
 
+Unsigned integer options accept decimal digits only; signs, whitespace, and
+out-of-range values are rejected before input files are opened. A fatal error
+on any rank aborts the evaluator communicator so that other ranks do not remain
+blocked in a later collective call.
+
 The expansion buffer option does not bound the total child records retained by
 a batch. All generated contribution records are collected before hash redistribution.
 
@@ -215,6 +220,11 @@ implementation does not construct a separate compacted array. Children whose
 contributions cancel still count as children. Globally, generated and received
 record counts agree. Hash balance should be judged using both received records
 (memory/aggregation work) and distinct children (owner assignment).
+
+Determinant-file loading is silent by default. Set `SBD_BASIS_IO_PROFILE=1` to
+write the per-loading-rank `basis-timing` and `load-files` diagnostics to standard
+error. This can produce many rank output files or lines at large scale and is
+intended only for explicit basis-I/O investigation.
 
 `lookup_bytes` uses vector sizes and does not include spare capacity, allocator
 overhead, other arrays, MPI buffers, or process RSS. This profile does not report

@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <iomanip>
 #include <atomic>
+#include <cstdlib>
 #include <cstdio>
 #include <type_traits>
 
@@ -18,6 +19,18 @@
 #include "sbd/framework/bit_manipulation.h"
 
 namespace sbd {
+
+  namespace detail {
+
+  inline bool basis_io_profile_enabled() {
+    static const bool enabled = [] {
+      const char* value = std::getenv("SBD_BASIS_IO_PROFILE");
+      return value != nullptr && value[0] == '1' && value[1] == '\0';
+    }();
+    return enabled;
+  }
+
+  }  // namespace detail
   
   template <typename Container>
   void redistribution(Container & config,
@@ -299,21 +312,24 @@ namespace sbd {
           "Unexpected character in basis file: expected '0' or '1'");
       double t_parse = omp_get_wtime();
 
-      // Report per-rank, per-file breakdown to stderr.
-      const double read_dt = t_read - t_alloc;
-      const double read_bw = (read_dt > 1e-6) ? file_size / read_dt / 1e6 : 0.0;
-      fprintf(stderr,
-        "basis-timing rank=%d file=%s size=%.0fMB "
-        "open=%.3fs buf_alloc=%.3fs read=%.3fs(%.0fMB/s) "
-        "cfg_alloc=%.3fs parse=%.3fs total=%.3fs\n",
-        rank, filename.c_str(), file_size / 1.0e6,
-        t_open   - t0,
-        t_alloc  - t_open,
-        read_dt, read_bw,
-        t_resize - t_read,
-        t_parse  - t_resize,
-        t_parse  - t0);
-      fflush(stderr);
+      if(detail::basis_io_profile_enabled()) {
+        // Report per-rank, per-file breakdown to stderr.
+        const double read_dt = t_read - t_alloc;
+        const double read_bw =
+            (read_dt > 1e-6) ? file_size / read_dt / 1e6 : 0.0;
+        fprintf(stderr,
+          "basis-timing rank=%d file=%s size=%.0fMB "
+          "open=%.3fs buf_alloc=%.3fs read=%.3fs(%.0fMB/s) "
+          "cfg_alloc=%.3fs parse=%.3fs total=%.3fs\n",
+          rank, filename.c_str(), file_size / 1.0e6,
+          t_open   - t0,
+          t_alloc  - t_open,
+          read_dt, read_bw,
+          t_resize - t_read,
+          t_parse  - t_resize,
+          t_parse  - t0);
+        fflush(stderr);
+      }
     } else if ( get_extension(filename) == std::string("bin") ) {
       std::ifstream ifs(filename, std::ios::binary);
       if( !ifs.is_open() ) {
@@ -525,14 +541,16 @@ namespace sbd {
       }
       double t_done = omp_get_wtime();
 
-      fprintf(stderr,
-        "load-files rank=%d files=%d: load=%.3fs check=%.3fs "
-        "merge=%.3fs(globally_ordered=%d) total=%.3fs\n",
-        mpi_rank, my_count,
-        t_load - t0, t_check - t_load,
-        t_done - t_check, (int)globally_ordered,
-        t_done - t0);
-      fflush(stderr);
+      if(detail::basis_io_profile_enabled()) {
+        fprintf(stderr,
+          "load-files rank=%d files=%d: load=%.3fs check=%.3fs "
+          "merge=%.3fs(globally_ordered=%d) total=%.3fs\n",
+          mpi_rank, my_count,
+          t_load - t0, t_check - t_load,
+          t_done - t_check, (int)globally_ordered,
+          t_done - t0);
+        fflush(stderr);
+      }
 
       // ---- Global sorted-and-no-cross-shard-dup check -------------------------
       // Send this rank's last element to rank+1; rank+1 verifies its first

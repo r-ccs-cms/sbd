@@ -12,6 +12,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace gdb_stat_evaluator {
@@ -41,6 +42,26 @@ inline std::string require_value(int argc, char** argv, int& index) {
   if(index + 1 >= argc)
     throw std::invalid_argument(std::string("missing value after ") + argv[index]);
   return argv[++index];
+}
+
+template <typename UInt>
+inline UInt parse_unsigned_decimal(const std::string& text,
+                                   const char* option) {
+  static_assert(std::is_unsigned_v<UInt>);
+  if(text.empty() ||
+     text.find_first_not_of("0123456789") != std::string::npos)
+    throw std::invalid_argument(std::string(option) +
+                                " must be an unsigned decimal integer");
+  unsigned long long value = 0;
+  try {
+    value = std::stoull(text);
+  } catch(const std::out_of_range&) {
+    throw std::invalid_argument(std::string(option) + " is out of range");
+  }
+  if(value > static_cast<unsigned long long>(
+                 std::numeric_limits<UInt>::max()))
+    throw std::invalid_argument(std::string(option) + " is out of range");
+  return static_cast<UInt>(value);
 }
 
 inline void append_comma_separated(const std::string& text,
@@ -75,26 +96,31 @@ inline CliOptions parse_options(int argc, char** argv) {
       options.observable = sbd::stat_evaluator::parse_observable(
           require_value(argc, argv, index));
     } else if(argument == "--bit-length" || argument == "--bit_length") {
-      options.bit_length = std::stoull(require_value(argc, argv, index));
+      options.bit_length = parse_unsigned_decimal<std::size_t>(
+          require_value(argc, argv, index), "--bit-length");
     } else if(argument == "--samples" || argument == "--sample-count") {
-      options.sample_count = std::stoull(require_value(argc, argv, index));
+      options.sample_count = parse_unsigned_decimal<std::size_t>(
+          require_value(argc, argv, index), "--samples");
     } else if(argument == "--batches" || argument == "--batch-count") {
-      options.batch_count = std::stoull(require_value(argc, argv, index));
+      options.batch_count = parse_unsigned_decimal<std::size_t>(
+          require_value(argc, argv, index), "--batches");
     } else if(argument == "--batch-id") {
-      options.first_batch_id = std::stoull(require_value(argc, argv, index));
+      options.first_batch_id = parse_unsigned_decimal<std::uint64_t>(
+          require_value(argc, argv, index), "--batch-id");
     } else if(argument == "--wavefunction-shards") {
-      options.wavefunction_shards =
-          std::stoull(require_value(argc, argv, index));
+      options.wavefunction_shards = parse_unsigned_decimal<std::size_t>(
+          require_value(argc, argv, index), "--wavefunction-shards");
     } else if(argument == "--seed") {
-      options.base_seed = std::stoull(require_value(argc, argv, index));
+      options.base_seed = parse_unsigned_decimal<std::uint64_t>(
+          require_value(argc, argv, index), "--seed");
     } else if(argument == "--heatbath-cutoff" ||
               argument == "--heatbath_cutoff") {
       options.heatbath_cutoff = std::stod(require_value(argc, argv, index));
     } else if(argument == "--reference-energy") {
       options.reference_energy = std::stod(require_value(argc, argv, index));
     } else if(argument == "--expansion-batch-size") {
-      options.expansion_batch_size =
-          std::stoull(require_value(argc, argv, index));
+      options.expansion_batch_size = parse_unsigned_decimal<std::size_t>(
+          require_value(argc, argv, index), "--expansion-batch-size");
     } else if(argument == "--minimum-abs-denominator") {
       options.minimum_abs_denominator =
           std::stod(require_value(argc, argv, index));
