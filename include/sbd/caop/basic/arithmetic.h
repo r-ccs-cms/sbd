@@ -40,6 +40,9 @@ namespace sbd {
     return res;
   }
 
+  // sign=true: fermions; sign=false: hard-core bosons (not ordinary bosons).
+  // Both obey {a_i, a_i^dagger}=1 and a_i^2=(a_i^dagger)^2=0.
+  // At distinct sites fermions anticommute, while hard-core bosons commute.
   template <typename ElemT>
   void NormalOrdering(const ProductOp & P,
 		      GeneralOp<ElemT> & G,
@@ -84,7 +87,7 @@ namespace sbd {
 	    osign.push_back(osign[m]);
 	  }
 	  CAOp ft2(tpop.fops_[indcr[m]+m_an-k-1]);
-	  if( sign ) {
+	  if( sign || ft2 == ft1 ) {
 	    osign[m] *= -1;
 	  } else {
 	    osign[m] *= 1;
