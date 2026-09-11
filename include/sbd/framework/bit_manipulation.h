@@ -7,6 +7,9 @@
 #ifndef SBD_FRAMEWORK_BIT_MANIPULATION_H
 #define SBD_FRAMEWORK_BIT_MANIPULATION_H
 
+#include "sbd/framework/type_def.h"
+#include "sbd/framework/mpi_utility.h"
+
 #include <stdint.h>
 #include <limits.h>
 #include <unistd.h>

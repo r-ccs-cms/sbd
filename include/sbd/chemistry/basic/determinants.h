@@ -5,6 +5,14 @@
 #ifndef SBD_CHEMISTRY_BASIC_DETERMINANTS_H
 #define SBD_CHEMISTRY_BASIC_DETERMINANTS_H
 
+#include <algorithm>
+#include <cstddef>
+#include <random>
+#include <stdexcept>
+#include <vector>
+#include "sbd/framework/bit_manipulation.h"
+#include "sbd/chemistry/basic/integrals.h"
+
 namespace sbd {
 
 #ifdef SBD_TRADMODE

@@ -6,6 +6,8 @@
 #ifndef SBD_FRAMEWORK_SORT_ARRAY_H
 #define SBD_FRAMEWORK_SORT_ARRAY_H
 
+#include "sbd/framework/type_def.h"
+
 #include <mpi.h>
 
 #include <algorithm>

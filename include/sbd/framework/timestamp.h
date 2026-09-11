@@ -6,6 +6,10 @@
 #ifndef SBD_FRAMEWORK_TIMESTAMP_H
 #define SBD_FRAMEWORK_TIMESTAMP_H
 
+#include <chrono>
+#include <ctime>
+#include <cstdint>
+
 namespace sbd {
   uint64_t make_timestamp() {
     auto now = std::chrono::system_clock::now();
