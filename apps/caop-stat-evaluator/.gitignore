@@ -1,0 +1,6 @@
+/caop-stat-evaluator
+/tests/test_stat
+/tests/test_h
+*.d
+/caop-stat-evaluator-complex
+/tests/test_complex

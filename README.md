@@ -34,6 +34,11 @@ Command-Line Interface (CLI) applications are provided in the `/apps` directory.
 - From v1.2.0, the sample code for parallelized selected basis diagonalization for quantum chemistry Hamiltonian in the general determinant basis is added in `apps/chemistry_gdb_selected_basis_diagonalization`.
 - From v1.3.0, the GPU implementation for quantum chemistry Hamiltonian in the tensor-product basis is added.
 
+- CPU/MPI statistical external-variance and PT2 evaluators are available for
+  [GDB](apps/gdb-stat-evaluator/README.md) and
+  [CAOP](apps/caop-stat-evaluator/README.md) wavefunctions. Both are built by CMake;
+  enable `SBD_BUILD_STAT_TESTS` to register their regression tests.
+
 ## Documentation
 
 For more details on the input file formats and internal structure, see the [User Manual](https://www.doxygen.nl/manual/doxygen_usage.html).
