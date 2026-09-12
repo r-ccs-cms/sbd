@@ -1,12 +1,3 @@
-# The statistical evaluator is a real-valued CPU/MPI application, including
-# when the diagonalization applications use a GPU backend or complex values.
-function(sbd_configure_stat target)
-  target_link_libraries(${target} PRIVATE sbd_headers MPI::MPI_CXX
-    OpenMP::OpenMP_CXX BLAS::BLAS LAPACK::LAPACK)
-  target_compile_definitions(${target} PRIVATE
-    $<$<BOOL:${SBD_TRADMODE}>:SBD_TRADMODE>)
-endfunction()
-
 add_executable(gdb-stat-evaluator main.cc cli_options.h)
 sbd_configure_stat(gdb-stat-evaluator)
 add_executable(gdb-stat-evaluator-uhf main.cc cli_options.h)

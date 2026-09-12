@@ -112,6 +112,15 @@ function(sbd_configure_diag target)
   endif()
 endfunction()
 
+# The statistical evaluator is a real-valued CPU/MPI application, including
+# when the diagonalization applications use a GPU backend or complex values.
+function(sbd_configure_stat target)
+  target_link_libraries(${target} PRIVATE sbd_headers MPI::MPI_CXX
+    OpenMP::OpenMP_CXX BLAS::BLAS LAPACK::LAPACK)
+  target_compile_definitions(${target} PRIVATE
+    $<$<BOOL:${SBD_TRADMODE}>:SBD_TRADMODE>)
+endfunction()
+
 # ── Apps ──────────────────────────────────────────────────────────────────────
 add_subdirectory(apps/caop_selected_basis_diagonalization)
 add_subdirectory(apps/chemistry_gdb_selected_basis_diagonalization)
@@ -123,3 +132,4 @@ if(SBD_BUILD_STAT_TESTS)
   enable_testing()
 endif()
 add_subdirectory(apps/gdb-stat-evaluator)
+add_subdirectory(apps/caop-stat-evaluator)
