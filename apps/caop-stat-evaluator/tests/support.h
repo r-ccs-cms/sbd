@@ -9,16 +9,18 @@
 namespace cs = sbd::caop::stat;
 using Dets = sbd::det_vector<std::size_t>;
 struct Factor { bool create; int q; };
-struct Term { double c; std::vector<Factor> ops; };
+template<class Scalar> struct BasicTerm { Scalar c; std::vector<Factor> ops; };
+using Term = BasicTerm<double>;
 void near(double x, double y) {
   if(!std::isfinite(x) || !std::isfinite(y) || std::abs(x-y)>1e-11*std::max({1.0,std::abs(x),std::abs(y)}))
     throw std::runtime_error("numeric mismatch: "+std::to_string(x)+" vs "+std::to_string(y));
 }
 // Independent small Fock-space application, without SBD masks/sign helpers.
-std::array<double,16> column(int ket, const std::vector<Term>& terms, bool fermion) {
-  std::array<double,16> result{};
+template<class Scalar>
+std::array<Scalar,16> column(int ket, const std::vector<BasicTerm<Scalar>>& terms, bool fermion) {
+  std::array<Scalar,16> result{};
   for(const auto& term: terms) {
-    int state=ket; double v=term.c;
+    int state=ket; Scalar v=term.c;
     for(auto op=term.ops.rbegin(); op!=term.ops.rend(); ++op) {
       bool occupied = (state>>op->q)&1;
       if(occupied==op->create) { v=0; break; }
@@ -29,10 +31,11 @@ std::array<double,16> column(int ket, const std::vector<Term>& terms, bool fermi
   }
   return result;
 }
-sbd::GeneralOp<double> build(const std::vector<Term>& terms, bool sign) {
-  sbd::GeneralOp<double> h;
+template<class Scalar>
+sbd::GeneralOp<Scalar> build(const std::vector<BasicTerm<Scalar>>& terms, bool sign) {
+  sbd::GeneralOp<Scalar> h;
   for(const auto& t:terms) {
-    sbd::GeneralOp<double> term(sbd::ProductOp{});
+    sbd::GeneralOp<Scalar> term(sbd::ProductOp{});
     for(const auto& op:t.ops) term *= op.create ? sbd::Cr(op.q) : sbd::An(op.q);
     h += t.c*term;
   }

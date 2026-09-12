@@ -3,6 +3,7 @@ set -eu
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 evaluator=${1:-"$script_dir/../caop-stat-evaluator"}
 fixture=${2:-"$script_dir/test_stat"}
+kind=${3:-real}
 summary="$script_dir/../../gdb-stat-evaluator/summarize-batches.pl"
 MPIEXEC=${MPIEXEC:-mpirun}
 MPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG:--np}
@@ -18,6 +19,16 @@ cat > "$work/ham.txt" <<'HAM'
 -0.5 cdag 1 c 2
 0.5 cdag 2 c 2
 HAM
+if [ "$kind" = complex ]; then
+  cat > "$work/ham.txt" <<'HAM'
+-1
+(0,1) cdag 2 c 0
+(0,-1) cdag 0 c 2
+(-0.5,0) cdag 2 c 1
+(-0.5,0) cdag 1 c 2
+(0.5,0) cdag 2 c 2
+HAM
+fi
 cat > "$work/basis.txt" <<'BASIS'
 001
 010

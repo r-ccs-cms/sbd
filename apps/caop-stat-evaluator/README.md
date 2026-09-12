@@ -1,7 +1,7 @@
 # CAOP stat evaluator
 
 A first CPU/MPI CLI for stochastic external variance and Epstein–Nesbet PT2 of
-a fixed, normalized real CAOP wavefunction. It follows the GDB statistical CLI and shares SBD framework helpers directly.
+a fixed, normalized real or complex CAOP wavefunction. It follows the GDB statistical CLI and shares SBD framework helpers directly.
 
 ## Build and tests
 
@@ -28,8 +28,21 @@ cmake --build build -j 2
 ctest --test-dir build -R '^stat_' --output-on-failure
 ```
 
-The evaluator targets always use real CPU/MPI code even when diagonalization
-applications select complex values or a GPU backend. `SBD_TRADMODE` is supported.
+The evaluator always runs on CPU/MPI, independently of the GPU backend.
+The default coefficient type is `double`. Configure with `-DSBD_COMPLEX=ON`
+to build `caop-stat-evaluator` with `std::complex<double>`, or use Make's
+`make complex` target to produce `caop-stat-evaluator-complex` (`-D_COMPLEX`).
+`make check-complex` runs the complex library and CLI tests. CTest tests both
+scalar types whenever `SBD_BUILD_STAT_TESTS=ON`, regardless of `SBD_COMPLEX`.
+`SBD_TRADMODE` is supported. GDB statistical executables remain real-valued.
+To build just the complex CAOP CLI with CMake:
+
+```sh
+cmake -S . -B build-complex -DSBD_COMPLEX=ON
+cmake --build build-complex --target caop-stat-evaluator
+```
+
+Run these two commands from the repository root.
 There is no separate UHF executable for the general CAOP Hamiltonian.
 The CLI regression requires Python 3 and Perl, accepts evaluator and fixture
 executable paths, and creates temporary inputs outside the source tree.
@@ -58,14 +71,19 @@ OMP_NUM_THREADS=1 mpirun -np 4 ./caop-stat-evaluator \
 not spatial orbitals. `--bit-length` defaults to 64 and must match the checkpoint.
 `--basisfiles` and `--detfiles` accept comma-separated sorted text basis shards.
 Hamiltonian files use the public CAOP format: first non-comment line `-1` for
-fermions or `1` for hard-core bosons/spins, then real coefficients and zero-based
-operators (`cdag`, `c`, `bdag`, `b`, `s+`, `s-`, `sx`, `sz`).
+fermions or `1` for hard-core bosons/spins, then coefficients and zero-based
+operators (`cdag`, `c`, `bdag`, `b`, `s+`, `s-`, `sx`, `sz`; also `sy` in complex builds).
+Complex coefficients use the standard `(real,imaginary)` notation, for example
+`(0,1) cdag 2 c 0` with its Hermitian partner `(0,-1) cdag 0 c 2`.
+Real coefficient literals are also accepted by the complex parser.
 
-Read real states saved with SBD's public `SaveWavefunction`; do not pass the
+Read states saved with SBD's public `SaveWavefunction`; do not pass the
 ExtSBD Heatbath-CI custom checkpoint format directly. The prefix is used literally:
 `state-` means `state-000000.bin`, etc. Saved b-shard count defaults to evaluator
 b size (`MPI size / h size`); explicitly set it when increasing b ranks. All saved shards must be
-present. Global coefficient norm must equal one within 1e-8; duplicate parents
+present. The executable's coefficient type must match the binary checkpoint:
+real and complex checkpoints are not interchangeable and are not converted
+automatically. The selected type is printed in the CLI log. Global coefficient norm must equal one within 1e-8; duplicate parents
 are rejected. Input basis and checkpoint must describe the same state.
 
 `--h-comm-size N` (alias `--h_comm_size`) defaults to 1 and must divide MPI size.
@@ -131,7 +149,7 @@ perl ../gdb-stat-evaluator/summarize-batches.pl --output summary.csv \
 
 ## Limits
 
-Real Hermitian models only; t=1, h configurable with default 1. Full-batch child buffers and per-parent aggregation maps are not memory
+Real or complex Hermitian models only; t=1, h configurable with default 1. Full-batch child buffers and per-parent aggregation maps are not memory
 capped by `--expansion-batch-size`; that option only bounds each thread's append
 buffer. The first version scans all off-diagonal terms for each sampled parent
 and local diagonal terms per queried external child. PT2 uses an h-step query ring. Large-system scaling is unmeasured.
@@ -153,4 +171,13 @@ collective singular-denominator rejection. The fixture's exact external variance
 is 0.04 and PT2 is -0.016; each batch satisfies PT2 = -variance/2.5.
 It also checks numeric and rank-diagnostic parsing with the shared summarizer.
 
-Large-system scaling and GPU execution are not covered by these tests.
+`tests/test_complex.cc` checks all small Fock-space columns against an
+independent complex oracle, exact multinomial means at zero/positive cutoff,
+fermionic/bosonic signs, h-sharded diagonals and parent aggregation, global-phase
+invariance, and cross-shard cancellation. Complex CLI fixtures use non-real
+wavefunction and Hamiltonian coefficients and exercise the same checkpoint,
+h=1/2/4, denominator-error and summary-parser checks as the real fixture.
+The real observables use squared magnitudes and real Hermitian diagonal elements;
+Hermiticity is an input requirement, not a full matrix validation by this CLI.
+
+Large-system scaling, Fugaku and GPU execution are not covered by these tests.

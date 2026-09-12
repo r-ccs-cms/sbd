@@ -112,8 +112,8 @@ function(sbd_configure_diag target)
   endif()
 endfunction()
 
-# The statistical evaluator is a real-valued CPU/MPI application, including
-# when the diagonalization applications use a GPU backend or complex values.
+# Statistical evaluators use CPU/MPI even when diagonalization uses a GPU.
+# Each application selects its supported coefficient type separately.
 function(sbd_configure_stat target)
   target_link_libraries(${target} PRIVATE sbd_headers MPI::MPI_CXX
     OpenMP::OpenMP_CXX BLAS::BLAS LAPACK::LAPACK)

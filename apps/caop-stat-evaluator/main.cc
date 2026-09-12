@@ -5,6 +5,7 @@
 
 #include <mpi.h>
 
+#include <complex>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
@@ -14,6 +15,11 @@
 #include <vector>
 
 namespace {
+#ifdef _COMPLEX
+using ElemType = std::complex<double>;
+#else
+using ElemType = double;
+#endif
 
 void free_communicator(MPI_Comm& communicator) {
   if(communicator != MPI_COMM_NULL) MPI_Comm_free(&communicator);
@@ -67,7 +73,7 @@ int main(int argc, char** argv) {
         throw std::runtime_error(
             "one or more requested wavefunction shards are missing");
 
-      sbd::GeneralOp<double> hamiltonian;
+      sbd::GeneralOp<ElemType> hamiltonian;
       bool sign = false;
       sbd::load_GeneralOp_from_file(cli.hamiltonian_path, hamiltonian, sign,
                                   h_comm, b_comm, MPI_COMM_SELF);
@@ -77,7 +83,7 @@ int main(int argc, char** argv) {
       sbd::det_vector<std::size_t>::init_elem_size(
           (sites + cli.bit_length - 1) / cli.bit_length);
       sbd::det_vector<std::size_t> parents;
-      std::vector<double> coefficients;
+      std::vector<ElemType> coefficients;
       if(load_rank) {
         sbd::load_basis_from_files(cli.determinant_files, parents,
                                    cli.bit_length, sites, load_b_comm);
@@ -120,15 +126,21 @@ int main(int argc, char** argv) {
       options.expansion_batch_size = cli.expansion_batch_size;
       options.minimum_abs_denominator = cli.minimum_abs_denominator;
 
-      if(rank == 0)
+      if(rank == 0) {
         caop_stat_evaluator::print_options(std::cout, cli, calculation_id, load_b_size, size);
+#ifdef _COMPLEX
+        std::cout << "# coefficient type: complex<double>\n";
+#else
+        std::cout << "# coefficient type: double\n";
+#endif
+      }
 
       std::vector<sbd::caop::stat::BatchRequest> batches(cli.batch_count);
       for(std::size_t offset = 0; offset < cli.batch_count; ++offset) {
         batches[offset].calculation_id = calculation_id;
         batches[offset].batch_id = cli.first_batch_id + offset;
       }
-      sbd::caop::stat::evaluate_statistical_batches<double, double>(
+      sbd::caop::stat::evaluate_statistical_batches<ElemType, double>(
           parents, coefficients, hamiltonian, sign, options, batches, world,
           [&](const sbd::caop::stat::EvaluatedBatch& evaluated) {
             sbd::stat_evaluator::write_stats_profiles(
