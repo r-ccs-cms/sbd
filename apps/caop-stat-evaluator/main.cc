@@ -109,7 +109,7 @@ int main(int argc, char** argv) {
       if(rank == 0 && write_header)
         sbd::stat_evaluator::write_csv_header(csv);
 
-      sbd::ca_stat::StatEvaluatorOptions<double> options;
+      sbd::caop::stat::StatEvaluatorOptions<double> options;
       options.observable = cli.observable;
       options.bit_length = cli.bit_length;
       options.sites = sites;
@@ -123,14 +123,14 @@ int main(int argc, char** argv) {
       if(rank == 0)
         caop_stat_evaluator::print_options(std::cout, cli, calculation_id, load_b_size, size);
 
-      std::vector<sbd::ca_stat::BatchRequest> batches(cli.batch_count);
+      std::vector<sbd::caop::stat::BatchRequest> batches(cli.batch_count);
       for(std::size_t offset = 0; offset < cli.batch_count; ++offset) {
         batches[offset].calculation_id = calculation_id;
         batches[offset].batch_id = cli.first_batch_id + offset;
       }
-      sbd::ca_stat::evaluate_statistical_batches<double, double>(
+      sbd::caop::stat::evaluate_statistical_batches<double, double>(
           parents, coefficients, hamiltonian, sign, options, batches, world,
-          [&](const sbd::ca_stat::EvaluatedBatch& evaluated) {
+          [&](const sbd::caop::stat::EvaluatedBatch& evaluated) {
             sbd::stat_evaluator::write_stats_profiles(
                 std::cout, evaluated.record.batch_id, evaluated.profile, world);
             sbd::stat_evaluator::write_stats_timing(

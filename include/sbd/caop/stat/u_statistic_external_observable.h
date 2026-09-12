@@ -20,8 +20,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace sbd {
-namespace ca_stat {
+namespace sbd::caop::stat {
 
 template <typename RealT>
 struct UStatisticExternalObservable {
@@ -145,7 +144,6 @@ UStatisticExternalObservable<RealT> u_statistic_external_observable(
       denominator_too_small);
 }
 
-}  // namespace ca_stat
-}  // namespace sbd
+}  // namespace sbd::caop::stat
 
 #endif

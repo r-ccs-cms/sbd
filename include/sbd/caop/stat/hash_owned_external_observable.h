@@ -23,8 +23,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace sbd {
-namespace ca_stat {
+namespace sbd::caop::stat {
 
 struct HashObservableCounts {
   std::size_t received_records = 0;
@@ -196,7 +195,6 @@ distributed_u_statistic_external_observable(
   return global;
 }
 
-}  // namespace ca_stat
-}  // namespace sbd
+}  // namespace sbd::caop::stat
 
 #endif

@@ -28,8 +28,7 @@
 #include <utility>
 #include <vector>
 
-namespace sbd {
-namespace ca_stat {
+namespace sbd::caop::stat {
 
 struct EvaluatedBatch {
   stat_evaluator::BatchRecord record;
@@ -257,7 +256,6 @@ EvaluatedBatch evaluate_statistical_batch(
   return output;
 }
 
-}  // namespace ca_stat
-}  // namespace sbd
+}  // namespace sbd::caop::stat
 
 #endif

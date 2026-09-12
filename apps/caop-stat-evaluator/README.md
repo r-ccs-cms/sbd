@@ -108,7 +108,7 @@ therefore differs from CAOP HCI's term-level selection threshold.
 
 Round-robin distribution, prepared Alias sampling, MurmurHash3 ownership and
 CSV/profile writers come from SBD framework helpers.
-CAOP calculation headers live in `include/sbd/caop/stat/`, under `sbd::ca_stat`,
+CAOP calculation headers live in `include/sbd/caop/stat/`, under `sbd::caop::stat`,
 and are also available through `sbd/sbd.h`. CLI options remain application-local
 in `caop_stat_evaluator`. Coefficient-only parent sampling lives in
 `sbd/framework/stat/parent_sampling.h` under `sbd::stat_evaluator`; the original

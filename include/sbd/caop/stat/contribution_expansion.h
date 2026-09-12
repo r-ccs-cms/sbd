@@ -15,7 +15,7 @@
 #include <cmath>
 #include <stdexcept>
 
-namespace sbd { namespace ca_stat {
+namespace sbd::caop::stat {
 
 template<class ElemT, class RealT> struct Contribution {
   ElemT weighted_amplitude{};
@@ -149,5 +149,5 @@ void local_contribution_expansion(
     flush();
   }
 }
-}} // namespace sbd::ca_stat
+} // namespace sbd::caop::stat
 #endif

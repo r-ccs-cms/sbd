@@ -6,7 +6,7 @@
 #include <iostream>
 #include <array>
 
-namespace cs = sbd::ca_stat;
+namespace cs = sbd::caop::stat;
 using Dets = sbd::det_vector<std::size_t>;
 struct Factor { bool create; int q; };
 struct Term { double c; std::vector<Factor> ops; };
