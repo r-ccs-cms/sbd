@@ -51,7 +51,7 @@ namespace sbd {
 	  bool use_precalculated_dets = true;
 	  int max_memory_gb_for_determinants = -1;
 	  bool thrust_collapse_loops = true;
-	  bool cpu_subspace = true;
+	  bool cpu_subspace = false;
 #endif
 	};
 
@@ -173,10 +173,10 @@ namespace sbd {
       int mpi_size; MPI_Comm_size(comm,&mpi_size);
 
 #ifdef SBD_THRUST
-      if (sbd_data.cpu_subspace && omp_get_max_threads() == 1) {
+      if (omp_get_max_threads() == 1) {
           if (mpi_rank == mpi_master)
-              std::cerr << "Error: cpu_subspace requires OpenMP threads > 1, "
-                           "but omp_get_max_threads() == 1. Set OMP_NUM_THREADS.\n";
+              std::cerr << "Error: omp_get_max_threads() == 1; host-side work needs "
+                           "OpenMP threads > 1. Set OMP_NUM_THREADS (and srun --cpus-per-task).\n";
           MPI_Abort(comm, 1);
       }
 #endif
