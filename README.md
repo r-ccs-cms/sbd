@@ -39,6 +39,10 @@ Command-Line Interface (CLI) applications are provided in the `/apps` directory.
   [CAOP](apps/caop-stat-evaluator/README.md) wavefunctions. Both are built by CMake;
   enable `SBD_BUILD_STAT_TESTS` to register their regression tests.
 
+- Matrix spectra from saved CAOP wavefunctions: [caop-spectrum](apps/caop-spectrum/README.md),
+  with real/complex block Lanczos and frequency-grid reevaluation. Built by CMake;
+  enable `SBD_BUILD_SPECTRUM_TESTS` for its CPU/MPI regression tests.
+
 ## Documentation
 
 For more details on the input file formats and internal structure, see the [User Manual](https://www.doxygen.nl/manual/doxygen_usage.html).

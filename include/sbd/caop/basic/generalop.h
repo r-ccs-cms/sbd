@@ -824,6 +824,10 @@ namespace sbd {
                          det_vector<size_t>& m1,
                          det_vector<size_t>& m2) const {
       size_t det_words = (size_t)(max_index() / (int)bit_length) + 1;
+      // A local Hamiltonian shard may touch only the lowest modes. Masks must
+      // still use the established determinant width, including empty shards.
+      // With no established width, retain the original inferred-width behavior.
+      if (det_words < m1.elem_size()) det_words = m1.elem_size();
       std::vector<size_t> zero(det_words, 0);
       m1 = det_vector<size_t>(o_.size(), zero);
       m2 = det_vector<size_t>(o_.size(), zero);

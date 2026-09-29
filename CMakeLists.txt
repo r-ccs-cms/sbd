@@ -112,13 +112,18 @@ function(sbd_configure_diag target)
   endif()
 endfunction()
 
-# Statistical evaluators use CPU/MPI even when diagonalization uses a GPU.
+# CPU tools use MPI/OpenMP even when diagonalization uses a GPU.
 # Each application selects its supported coefficient type separately.
-function(sbd_configure_stat target)
+function(sbd_configure_cpu target)
   target_link_libraries(${target} PRIVATE sbd_headers MPI::MPI_CXX
     OpenMP::OpenMP_CXX BLAS::BLAS LAPACK::LAPACK)
   target_compile_definitions(${target} PRIVATE
     $<$<BOOL:${SBD_TRADMODE}>:SBD_TRADMODE>)
+endfunction()
+
+# Retain the existing evaluator helper as a forwarding entry point.
+function(sbd_configure_stat target)
+  sbd_configure_cpu(${target})
 endfunction()
 
 # ── Apps ──────────────────────────────────────────────────────────────────────
@@ -133,3 +138,12 @@ if(SBD_BUILD_STAT_TESTS)
 endif()
 add_subdirectory(apps/gdb-stat-evaluator)
 add_subdirectory(apps/caop-stat-evaluator)
+
+# Spectrum generation is CPU/MPI and supports both scalar types at runtime.
+option(SBD_BUILD_SPECTRUM_TESTS "Build block Lanczos and CAOP spectrum tests" OFF)
+if(SBD_BUILD_SPECTRUM_TESTS)
+  enable_testing()
+  find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
+  add_subdirectory(tests/functionality)
+endif()
+add_subdirectory(apps/caop-spectrum)
