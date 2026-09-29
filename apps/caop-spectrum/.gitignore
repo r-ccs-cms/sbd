@@ -1,0 +1,8 @@
+/caop-spectrum
+*.d
+/tests/test_block_lanczos
+/tests/test_remap_wavefunction
+/tests/test_checkpoint_io
+/tests/test_local_basis
+/examples/spin_dimer/write_state
+__pycache__/
