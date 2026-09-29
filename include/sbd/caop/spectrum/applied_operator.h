@@ -28,8 +28,23 @@ inline bool single_particle_excite(const Row& source,std::size_t orbital,bool ad
 }
 template<class ElemT=double> struct SeedSpace {
   Basis basis;                      // Only this rank's excitation determinants.
+  std::size_t generated_basis_size=0; // Global unique generated rows, before extra.
   std::vector<ElemT> local_seeds;   // Exactly basis.size() * number of seeds.
 };
+// Count generated determinants before union with extra. Zero amplitudes and
+// cancelled contributions still count as generated rows, not nonzero support.
+template<class ElemT>
+inline void complete_seed_basis(SeedSpace<ElemT>& out,const Basis& extra,MPI_Comm comm) {
+  sbd::murmur_basis::redistribute_unique_determinants_by_hash(out.basis,comm);
+  const std::size_t local=out.basis.size(),extra_local=extra.size();
+  std::size_t extra_global=0;
+  MPI_Allreduce(&local,&out.generated_basis_size,1,SBD_MPI_SIZE_T,MPI_SUM,comm);
+  MPI_Allreduce(&extra_local,&extra_global,1,SBD_MPI_SIZE_T,MPI_SUM,comm);
+  if(extra_global) {
+    for(const auto& d:extra) out.basis.push_back(d);
+    sbd::murmur_basis::redistribute_unique_determinants_by_hash(out.basis,comm);
+  }
+}
 template<class ElemT>
 inline SeedSpace<ElemT> single_particle_seeds(const Wavefunction<ElemT>& state,
     const std::vector<std::size_t>& orbitals,bool addition,bool fermion,
@@ -37,7 +52,7 @@ inline SeedSpace<ElemT> single_particle_seeds(const Wavefunction<ElemT>& state,
   if(orbitals.empty()) throw std::invalid_argument("no excitation orbitals");
   for(auto o:orbitals) if(o>=sites) throw std::invalid_argument("excitation orbital out of range");
   global_norm2(state,comm); // Collective shape/finite checks, no normalization.
-  SeedSpace<ElemT> out;out.basis=extra;
+  SeedSpace<ElemT> out;
   for(const auto& d:extra) validate_det(d,sites,bits);
   const auto s=orbitals.size();
   const auto max_rows=out.basis.flat().max_size()/std::max(std::size_t(1),out.basis.elem_size());
@@ -52,7 +67,7 @@ inline SeedSpace<ElemT> single_particle_seeds(const Wavefunction<ElemT>& state,
       if(single_particle_excite(parent,o,addition,fermion,bits,d,phase)) out.basis.push_back(d);
   }
   // Existing SBD distributed union: each row has one owner and is locally sorted.
-  sbd::murmur_basis::redistribute_unique_determinants_by_hash(out.basis,comm);
+  complete_seed_basis(out,extra,comm);
   if(out.basis.size()>std::numeric_limits<std::size_t>::max()/s)
     throw std::overflow_error("seed block size overflow");
   out.local_seeds.assign(out.basis.size()*s,0);
@@ -79,7 +94,7 @@ inline SeedSpace<ElemT> general_operator_seeds(const Wavefunction<ElemT>& state,
   if(operators.empty()) throw std::invalid_argument("no applied operators");
   global_norm2(state,comm);
   for(const auto& d:state.basis) validate_det(d,sites,bits);
-  SeedSpace<ElemT> out;out.basis=extra;
+  SeedSpace<ElemT> out;
   for(const auto& d:extra) validate_det(d,sites,bits);
   const auto count=operators.size();
   std::vector<Basis> generated(count);
@@ -152,7 +167,7 @@ inline SeedSpace<ElemT> general_operator_seeds(const Wavefunction<ElemT>& state,
     basis=std::move(unique);values=std::move(summed);
     for(const auto& d:basis) out.basis.push_back(d);
   }
-  sbd::murmur_basis::redistribute_unique_determinants_by_hash(out.basis,comm);
+  complete_seed_basis(out,extra,comm);
   out.local_seeds.assign(sbd::sparse_solver::matrix_size(out.basis.size(),count),0);
   for(std::size_t v=0;v<count;++v) {
     std::vector<ElemT> mapped;

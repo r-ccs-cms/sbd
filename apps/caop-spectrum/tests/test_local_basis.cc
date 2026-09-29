@@ -49,6 +49,7 @@ int main(int argc,char** argv) {
       {.4,{{true,0},{true,2},{false,2},{false,0}}}};
     for(bool sign:{false,true}) {
       auto seeds=cs::single_particle_seeds(state,orbitals,true,sign,4,2,extra,b_comm);
+      check(seeds.generated_basis_size==3,"generated union excludes extra rows");
       check(seeds.local_seeds.size()==seeds.basis.size()*3,"local seed shape");
       std::array<int,16> owned{},all_owned{};
       for(std::size_t i=0;i<seeds.basis.size();++i) {
@@ -118,8 +119,14 @@ int main(int argc,char** argv) {
       // One-dimensional removal space ensures empty owners with MPI > 1.
       auto removal=cs::single_particle_seeds(state,orbitals,false,sign,4,2,{},b_comm);
       check(removal.local_seeds.size()==removal.basis.size()*3,"empty-owner seed shape");
-      auto result=cs::spectrum(h_rank==0&&t_rank==0?state:cs::Wavefunction<>{},
-          h,sign,orbitals,false,4,2,{},0,h_comm,b_comm,t_comm);
+      std::vector<cs::SpectrumProgress> events;
+      auto result=cs::spectrum<double>(h_rank==0&&t_rank==0?state:cs::Wavefunction<>{},
+          h,sign,orbitals,false,4,2,{},0,h_comm,b_comm,t_comm,{},nullptr,true,
+          [&](const cs::SpectrumProgress& event){events.push_back(event);});
+      check(events.size()==9,"workflow start/end plus one iteration");
+      for(const auto& event:events) if(event.completed && std::string(event.stage)=="seed_generation")
+        check(event.reference_basis_size==2 && event.generated_basis_size==1 && event.basis_size==1,
+            "global counts must not multiply h/t replicas");
       check(result.basis_size==1,"global basis size metadata");
       auto g=cs::green_function(result,.8,.2);
       for(int i=0;i<3;++i) for(int j=0;j<3;++j) {

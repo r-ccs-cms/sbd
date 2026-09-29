@@ -77,6 +77,36 @@ distributed over b, H terms over h, and multiplication tasks over t. Gram/norm
 reductions count only the unique b rows. Input and seed generation run on h=t=0;
 only the completed excitation basis and seed blocks are replicated over h/t.
 
+## Runtime logging
+
+The CLI prints resolved settings as `#` records and runtime messages with
+`make_timestamp()` and the `sbd::spectrum:` prefix, on world rank zero.
+Workflow boundaries are flushed even when stdout is redirected to a file.
+They cover checkpoint/extra-basis/operator/Hamiltonian reading, optional remap,
+seed generation and QR, Hamiltonian preparation, Lanczos, coefficient I/O,
+and response evaluation with CSV writing.
+
+`--iteration-log-interval N` controls completed-step messages: 0 (default)
+disables them, 1 prints every step, and N prints multiples of N. Workflow
+messages and the final result/total time remain enabled. Iteration records
+report the current and next block rank and elapsed Lanczos time.
+
+Seed preparation reports the reference determinant count, the unique union
+of generated determinants before extra-basis inclusion, and the final excitation
+basis count. Generated rows include zero or cancelled amplitudes; this is not a
+nonzero-support count. Counts exclude h/t replicas. QR reports the number of
+input vectors and the retained rank.
+
+Stage times are world-rank-zero wall times, not sums of rank times. The total
+is the maximum local elapsed time across ranks, from after argument parsing
+through computation, coefficient saving and optional CSV output, before MPI
+finalization. Nested stage times should not be added to the total. These logs
+are workflow timings, not hardware profiles or rank-by-rank load-balance reports.
+
+Library calls remain silent by default. Optional final callback arguments to
+`spectrum` and `block_lanczos` deliver workflow and iteration information on
+all participating ranks without prescribing a stream or output format.
+
 ## Wavefunction and basis contract
 
 `ReadWavefunctionCheckpoint<ElemT>` reads the native files produced by CAOP

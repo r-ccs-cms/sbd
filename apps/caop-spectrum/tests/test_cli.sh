@@ -165,6 +165,31 @@ for threads in 1 2 3; do
   OMP_NUM_THREADS=$threads "$python" "$script_dir/test_general_operators.py" "$work"
 done
 "$python" "$script_dir/test_complex_cli.py" "$work"
+# Logging is optional per iteration, but workflow/timing remains visible.
+for interval in 0 1 2; do
+  mpi_run 2 "$exe" --hamfile "$work/ham.txt" --loadname "$work/state-" \
+    --wavefunction-shards 1 --sites 4 --orbitals 0,1,2 --channel addition \
+    --reference-energy -1 --steps 12 --extra-detfile "$work/extra.txt" \
+    --iteration-log-interval "$interval" --save-coefficients "$work/log-$interval.coeff" \
+    --output "$work/log-$interval.csv" > "$work/log-$interval.log"
+done
+"$python" - "$work" <<'PYLOG'
+import pathlib,re,sys
+root=pathlib.Path(sys.argv[1])
+for interval in (0,1,2):
+    lines=(root/f'log-{interval}.log').read_text().splitlines()
+    assert lines and all(x.startswith('# ') or re.match(r' \d+ sbd::spectrum: ',x) for x in lines)
+    steps=int(re.search(r'result .*steps=(\d+)', '\n'.join(lines))[1])
+    reported=[int(re.search(r'iteration step=(\d+)',x)[1]) for x in lines if ': iteration ' in x]
+    assert reported==(list(range(interval,steps+1,interval)) if interval else []), reported
+    for stage in ('checkpoint_read','hamiltonian_read','seed_generation','seed_qr','hamiltonian_preparation','lanczos','coefficient_write','response_and_csv_write','total'):
+        assert sum(': start '+stage==x.split(' sbd::spectrum')[-1] for x in lines)==1, stage
+        assert sum(': end '+stage+' ' in x for x in lines)==1, stage
+    assert 'reference_basis=2 generated_basis=3 excitation_basis=6' in '\n'.join(lines)
+    assert (root/f'log-{interval}.coeff').read_bytes()==(root/'log-0.coeff').read_bytes()
+    assert (root/f'log-{interval}.csv').read_bytes()==(root/'log-0.csv').read_bytes()
+print('PASS: timestamped workflow, iteration intervals, global counts and unchanged outputs')
+PYLOG
 # Check the saved format across real/complex and single/general fixtures.
 "$python" - "$work" <<'PYFORMAT'
 import pathlib, sys

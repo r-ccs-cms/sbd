@@ -16,7 +16,7 @@ struct Options {
   std::string ham,load,read,save,output,channel,hamiltonian_mode="stored",applied_operator_type="single-particle",scalar_type="real",wavefunction_type;
   std::vector<std::string> extra,remap,operator_files;
   std::vector<std::size_t> orbitals;
-  std::size_t sites=0,bits=64,shards=0,points=201,h_size=1,t_size=1;
+  std::size_t sites=0,bits=64,shards=0,points=201,h_size=1,t_size=1,iteration_log_interval=0;
   double energy=0,min=-10,max=10,eta=.1;
   bool has_energy=false,normalize=false,help=false;
   sbd::sparse_solver::LanczosOptions lanczos;
@@ -36,6 +36,7 @@ inline void usage() {
     "  --save-coefficients FILE [--extra-detfile FILE (repeatable)]\n"
     "  [--remap-detfile FILE (repeatable)] [--normalize-remap] [--bit-length 64]\n"
     "  [--hamiltonian-mode stored|on-the-fly] (default stored)\n"
+    "  [--iteration-log-interval 0] (0 disables iteration logs)\n"
     "  [--steps 100] [--rank-atol 1e-13] [--rank-rtol 1e-12]\n"
     "  [--h-comm-size 1] [--t-comm-size 1] (b = MPI size / h / t)\n"
     "  [--scalar-type real|complex] (default real); --wavefunction-type defaults to scalar type\n"
@@ -70,6 +71,7 @@ inline Options parse(int argc,char** argv) {
     else if(k=="--sites") o.sites=integer(v);
     else if(k=="--bit-length") o.bits=integer(v);
     else if(k=="--wavefunction-shards") o.shards=integer(v);
+    else if(k=="--iteration-log-interval") o.iteration_log_interval=integer(v);
     else if(k=="--steps") o.lanczos.max_steps=integer(v);
     else if(k=="--points") o.points=integer(v);
     else if(k=="--reference-energy") {o.energy=real(v);o.has_energy=true;}
@@ -104,6 +106,42 @@ inline Options parse(int argc,char** argv) {
   for(std::size_t j=0;j<o.shards;++j) inputs.insert(sbd::statefilename(o.load,int(j)));
   if((!o.save.empty()&&inputs.count(o.save))||(!o.output.empty()&&inputs.count(o.output))||(!o.save.empty()&&o.save==o.output)) throw std::invalid_argument("input/output paths collide");
   return o;
+}
+// Configuration records use #; runtime records are emitted by the CLI driver.
+inline void print_options(std::ostream& out,const Options& o,int mpi_size,bool complex) {
+  const auto precision=out.precision(17);
+  auto files=[&](const char* label,const std::vector<std::string>& paths) {
+    out<<"# "<<label<<":";for(const auto& path:paths) out<<' '<<path;out<<'\n';
+  };
+  out<<"# mode: "<<(o.read.empty()?"generate":"reevaluate")<<'\n'
+     <<"# coefficient type: "<<(complex?"complex<double>":"double")<<'\n'
+     <<"# MPI size: "<<mpi_size<<'\n'
+     <<"# iteration log interval: "<<o.iteration_log_interval<<'\n';
+  if(o.read.empty()) {
+    out<<"# h size: "<<o.h_size<<"\n# t size: "<<o.t_size<<'\n';
+    if(o.h_size<=std::size_t(mpi_size) && o.t_size<=std::size_t(mpi_size)/o.h_size)
+      out<<"# b size: "<<mpi_size/o.h_size/o.t_size<<'\n';
+    out<<"# Hamiltonian: "<<o.ham<<"\n# Hamiltonian mode: "<<o.hamiltonian_mode
+       <<"\n# load name: "<<o.load<<"\n# wavefunction shards: "<<o.shards
+       <<"\n# wavefunction type: "<<o.wavefunction_type<<"\n# sites: "<<o.sites
+       <<"\n# bit length: "<<o.bits<<"\n# reference energy: "<<o.energy
+       <<"\n# applied operator type: "<<o.applied_operator_type<<'\n';
+    if(o.applied_operator_type=="single-particle") {
+      out<<"# channel: "<<o.channel<<"\n# orbitals:";
+      for(auto orbital:o.orbitals) out<<' '<<orbital;
+      out<<'\n';
+    }
+    files("operator files",o.operator_files);files("extra determinant files",o.extra);
+    files("remap determinant files",o.remap);
+    out<<"# normalize remap: "<<o.normalize<<"\n# maximum steps: "<<o.lanczos.max_steps
+       <<"\n# rank atol: "<<o.lanczos.rank_atol<<"\n# rank rtol: "<<o.lanczos.rank_rtol
+       <<"\n# orthogonality tolerance: "<<o.lanczos.orthogonality_tolerance
+       <<"\n# save coefficients: "<<o.save<<'\n';
+  } else out<<"# read coefficients: "<<o.read<<'\n';
+  out<<"# output CSV: "<<o.output<<'\n';
+  if(!o.output.empty()) out<<"# omega min: "<<o.min<<"\n# omega max: "<<o.max
+      <<"\n# points: "<<o.points<<"\n# eta: "<<o.eta<<'\n';
+  out.precision(precision);out.flush();
 }
 } // namespace sbd_caop_spectrum_cli
 #endif

@@ -6,11 +6,19 @@
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <functional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
 namespace sbd { namespace sparse_solver {
+/** Progress after one completed recurrence step; ranks are block dimensions. */
+struct LanczosProgress {
+  std::size_t step=0, current_rank=0, next_rank=0;
+  double elapsed_seconds=0;
+};
+using LanczosProgressCallback=std::function<void(const LanczosProgress&)>;
+
 /**
  * @brief Construct a block Lanczos basis by recurrence and return its coefficients.
  *
@@ -36,6 +44,10 @@ namespace sbd { namespace sparse_solver {
  *        Passed by value as working storage; use std::move to transfer ownership.
  * @param rows Number of locally owned elements in each vector of q.
  * @param opt Iteration limit, rank thresholds, and orthogonality tolerance.
+ * @param on_iteration Optional synchronous callback after each completed step,
+ *        invoked on every participating rank. Elapsed time is local to that rank.
+ *        No logging or additional MPI communication is performed by the callback
+ *        mechanism. Observers must not alter solver state; exceptions propagate.
  * @return Coefficient blocks, ranks, and diagnostics. The final residual factor
  *         is stored in terminal_B. Stops on zero residual rank or max_steps;
  *         an empty initial block returns an empty coefficient chain.
@@ -53,7 +65,8 @@ namespace sbd { namespace sparse_solver {
 template<class T,class ApplyH>
 LanczosCoefficients<T> block_lanczos(
     ApplyH&& apply_h,MPI_Comm comm,std::vector<std::vector<T>> q,std::size_t rows,
-    const LanczosOptions& opt={}) {
+    const LanczosOptions& opt={}, const LanczosProgressCallback& on_iteration={}) {
+  const double started=on_iteration?MPI_Wtime():0;
   const auto width0=q.size();
   std::size_t width=width0;
   check_block_rows(q,rows);
@@ -103,6 +116,7 @@ LanczosCoefficients<T> block_lanczos(
     auto qr=orthogonalize(w,comm,opt.rank_atol+opt.rank_rtol*work_scale,opt.rank_rtol);
     out.ranks.push_back(qr.rank);
     out.A.push_back(std::move(a)); out.discarded_norms.push_back(qr.discarded_norm);
+    if(on_iteration) on_iteration({step+1,width,qr.rank,MPI_Wtime()-started});
     if(!qr.rank || step+1==opt.max_steps) {
       out.terminal_B=std::move(qr.factor);
       out.stop_reason=qr.rank?"max_steps":"rank_threshold"; break;

@@ -30,7 +30,19 @@ void analytic_test(int rank,int size,std::size_t p) {
         y[v][i]+=h[(i+range.first)*n+k]*global[k];
     }
   };
+  std::vector<ss::LanczosProgress> progress;
+  const auto observed=ss::block_lanczos<C>(apply_h,MPI_COMM_WORLD,vectors,rows,{},
+      [&](const ss::LanczosProgress& p){progress.push_back(p);});
   const auto c=ss::block_lanczos<C>(apply_h,MPI_COMM_WORLD,std::move(vectors),rows);
+  require(observed.A==c.A && observed.B==c.B && observed.terminal_B==c.terminal_B,
+      "observer changed coefficients");
+  require(progress.size()==c.A.size(),"one callback per completed step");
+  for(std::size_t j=0;j<progress.size();++j) {
+    require(progress[j].step==j+1 && progress[j].current_rank==c.ranks[j] &&
+        progress[j].next_rank==c.ranks[j+1],"callback step/rank");
+    require(progress[j].elapsed_seconds>=0 && (!j ||
+        progress[j].elapsed_seconds>=progress[j-1].elapsed_seconds),"callback clock");
+  }
   require(c.stop_reason=="rank_threshold","full chain must terminate");
   auto transformed=ss::multiply(ss::adjoint(u,n,n),f,n,n,p);
   for(double w:{-2.0,0.2,2.5}) for(double eta:{.07,.4}) {
