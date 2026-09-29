@@ -79,6 +79,7 @@ namespace sbd {
     MPI_Datatype DataT = GetMpiType<RealT>::MpiT;
     MPI_Allreduce(&sum,&res,1,DataT,MPI_SUM,comm);
     res = std::sqrt(res);
+    if (res == RealT(0)) return;
     ElemT factor = ElemT(1.0/res);
 #pragma omp parallel for schedule(static)
     for(size_t is=0; is < X.size(); is++) {

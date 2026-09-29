@@ -14,12 +14,14 @@
 #endif
 
 #include "sbd/framework/thrust_kernels.h"
+#include "sbd/chemistry/basic/subspace_thrust.h"
 
 namespace sbd
 {
 
-template <typename ElemT, typename RealT>
-void Lanczos(const thrust::device_vector<ElemT> &hii,
+// Lanczos body shared by both subspace locations (see DavidsonImpl).
+template <typename Space, typename ElemT, typename RealT>
+void LanczosImpl(const thrust::device_vector<ElemT> &hii,
 				std::vector<ElemT> &W,
 				MultBase<ElemT>& mult,
 				int max_iteration,
@@ -27,6 +29,9 @@ void Lanczos(const thrust::device_vector<ElemT> &hii,
 				RealT eps)
 {
     SBD_NVTX_RANGE_COLOR("Lanczos", __LINE__);
+    using Vector = typename Space::template vector<ElemT>;
+    Space::check(mult.b_comm());
+    auto policy = Space::policy();
 
 	char jobz = 'V';
 	char uplo = 'U';
@@ -53,11 +58,12 @@ void Lanczos(const thrust::device_vector<ElemT> &hii,
 //	std::vector<std::vector<ElemT>> C(num_block, W);
 
     // copyin W
-    thrust::device_vector<ElemT> W_dev(W.size());
+    Vector W_dev(W.size());
     thrust::copy_n(W.begin(), W.size(), W_dev.begin());
 
-    std::vector<thrust::device_vector<ElemT>> C(num_block);
-    thrust::device_vector<ElemT> HC(W.size());
+    std::vector<Vector> C(num_block);
+    Vector HC(W.size());
+    SubspaceMult<Space, ElemT> smult(mult, hii, W.size());
     for (int i = 0; i < num_block; i++) {
         C[i].resize(W.size());
 		C[i] = W_dev;
@@ -79,7 +85,7 @@ void Lanczos(const thrust::device_vector<ElemT> &hii,
 			int ii = ib + lda * ib;
 			int ij = ib + lda * (ib + 1);
 			int ji = ib + 1 + lda * ib;
-			mult.run(hii, C[ib], HC);
+			smult.add(C[ib], HC);
 
 			InnerProduct(C[ib], HC, Aii, mult.b_comm());
 			A[ii] = GetReal(Aii);
@@ -100,7 +106,7 @@ void Lanczos(const thrust::device_vector<ElemT> &hii,
 			}
 
 			// HC[is] -= Aii * C[ib][is];
-			thrust::transform(thrust::device, C[ib].begin(), C[ib].end(), HC.begin(), HC.begin(), AXPY_kernel<ElemT>(-Aii));
+			thrust::transform(policy, C[ib].begin(), C[ib].end(), HC.begin(), HC.begin(), AXPY_kernel<ElemT>(-Aii));
 
 			// C[ib + 1][is] = HC[is];
 			C[ib + 1] = HC;
@@ -127,13 +133,13 @@ void Lanczos(const thrust::device_vector<ElemT> &hii,
 
 			ElemT volp(1.0 / (mpi_size_h * mpi_size_t));
 			// HC[is] = -A[ij] * volp * C[ib][is];
-            thrust::transform(thrust::device, C[ib].begin(), C[ib].end(), HC.begin(), AX_kernel<ElemT>(-A[ij] * volp));
+            thrust::transform(policy, C[ib].begin(), C[ib].end(), HC.begin(), AX_kernel<ElemT>(-A[ij] * volp));
 
 			MpiAllreduce(HC, MPI_SUM, mult.t_comm());
 			MpiAllreduce(HC, MPI_SUM, mult.h_comm());
 
 			// HC[is] *= volp;
-			thrust::transform(thrust::device, HC.begin(), HC.end(), HC.begin(), AX_kernel<ElemT>(volp));
+			thrust::transform(policy, HC.begin(), HC.end(), HC.begin(), AX_kernel<ElemT>(volp));
 		}
 
 		for (int i = 0; i < n; i++) {
@@ -145,10 +151,10 @@ void Lanczos(const thrust::device_vector<ElemT> &hii,
 		for (int ib = 0; ib < n; ib++) {
 			if (ib == 0) {
 				// W[is] = U[0] * C[ib][is];
-				thrust::transform(thrust::device, C[ib].begin(), C[ib].end(), W_dev.begin(), AX_kernel<ElemT>(U[0]));
+				thrust::transform(policy, C[ib].begin(), C[ib].end(), W_dev.begin(), AX_kernel<ElemT>(U[0]));
 			} else {
 				// W[is] += U[ib] * C[ib][is];
-				thrust::transform(thrust::device, C[ib].begin(), C[ib].end(), W_dev.begin(), W_dev.begin(), AXPY_kernel<ElemT>(U[ib]));
+				thrust::transform(policy, C[ib].begin(), C[ib].end(), W_dev.begin(), W_dev.begin(), AXPY_kernel<ElemT>(U[ib]));
 			}
 		}
 		if (stop_it) {
@@ -161,6 +167,22 @@ void Lanczos(const thrust::device_vector<ElemT> &hii,
 	free(A);
 	free(E);
 	free(U);
+}
+
+
+template <typename ElemT, typename RealT>
+void Lanczos(const thrust::device_vector<ElemT> &hii,
+				std::vector<ElemT> &W,
+				MultBase<ElemT>& mult,
+				int max_iteration,
+				int num_block,
+				RealT eps,
+				bool cpu_subspace = false)
+{
+    if (cpu_subspace)
+        LanczosImpl<HostSubspace>(hii, W, mult, max_iteration, num_block, eps);
+    else
+        LanczosImpl<DeviceSubspace>(hii, W, mult, max_iteration, num_block, eps);
 }
 
 }
