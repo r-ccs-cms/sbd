@@ -25,7 +25,7 @@ option(SBD_USE_NCCL                    "Link against NCCL"                      
 option(SBD_USE_CUBLAS                  "Link against cuBLAS"                               OFF)
 option(SBD_USE_RANK_DISTRIBUTION       "Enable rank distribution"                          OFF)
 option(SBD_USE_BLOCK_RANK_DISTRIBUTION "Enable block rank distribution"                    OFF)
-option(SBD_REORDER_INDEX_ARRAY         "Enable index array reordering"                     OFF)
+option(SBD_REORDER_INDEX_ARRAY         "Enable index array reordering"                     ON)
 option(SBD_USE_32BIT_PARITY            "Use 32-bit parity"                                 OFF)
 option(SBD_USE_THRUST_NOSYNC           "Thrust nosync mode"                                OFF)
 option(SBD_SBDIAG_DEBUG                "SBD diagnostic debug output"                       OFF)

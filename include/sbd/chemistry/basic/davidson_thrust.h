@@ -20,6 +20,7 @@
 #endif
 
 #include "sbd/framework/thrust_kernels.h"
+#include "sbd/framework/dm_vector.h"
 
 namespace sbd
 {
@@ -675,6 +676,223 @@ void Davidson(const thrust::device_vector<ElemT> &hii,
 }
 
 #endif // #ifndef SBD_USE_CUBLAS
+
+// Davidson with CPU-resident trial/sigma vectors (LPDDR5X).
+// Fixed HBM cost: 2 staging buffers regardless of subspace depth.
+// Primary purpose: avoid OOM when num_block*n_vec_bytes exceeds HBM.
+// Enable at runtime with --cpu_subspace 1.
+template <typename ElemT, typename RealT>
+void DavidsonCPUSubspace(const thrust::device_vector<ElemT> &hii,
+                          std::vector<ElemT> &W,
+                          MultBase<ElemT>& mult,
+                          int max_iteration,
+                          int num_block,
+                          RealT eps,
+                          RealT max_time)
+{
+    SBD_NVTX_RANGE_COLOR("DavidsonCPUSubspace", __LINE__);
+    RealT eps_reg = 1.0e-12;
+    size_t n = W.size();
+
+    std::vector<std::vector<ElemT>> C(num_block, std::vector<ElemT>(n, ElemT(0)));
+    std::vector<std::vector<ElemT>> HC(num_block, std::vector<ElemT>(n, ElemT(0)));
+    thrust::device_vector<ElemT> C_dev(n);
+    thrust::device_vector<ElemT> HC_dev(n);
+
+    std::vector<ElemT> W_cpu(W);
+    std::vector<ElemT> R_cpu(n, ElemT(0));
+
+    // CPU diagonal for Determine preconditioner (equivalent of GetTotalD_Thrust)
+    std::vector<ElemT> hii_cpu(n);
+    thrust::copy(hii.begin(), hii.end(), hii_cpu.begin());
+    std::vector<ElemT> dii_cpu(n);
+    {
+        int h_size; MPI_Comm_size(mult.h_comm(), &h_size);
+        if (h_size == 1) {
+            dii_cpu = hii_cpu;
+        } else {
+            MPI_Datatype DataT = GetMpiType<ElemT>::MpiT;
+            MPI_Allreduce(hii_cpu.data(), dii_cpu.data(), (int)n, DataT, MPI_SUM, mult.h_comm());
+        }
+    }
+
+    int mpi_rank_h; MPI_Comm_rank(mult.h_comm(), &mpi_rank_h);
+    int mpi_size_h; MPI_Comm_size(mult.h_comm(), &mpi_size_h);
+    int mpi_rank_b; MPI_Comm_rank(mult.b_comm(), &mpi_rank_b);
+    int mpi_size_b; MPI_Comm_size(mult.b_comm(), &mpi_size_b);
+    int mpi_rank_t; MPI_Comm_rank(mult.t_comm(), &mpi_rank_t);
+    int mpi_size_t; MPI_Comm_size(mult.t_comm(), &mpi_size_t);
+
+    ElemT *H = (ElemT *)calloc(num_block * num_block, sizeof(ElemT));
+    ElemT *U = (ElemT *)calloc(num_block * num_block, sizeof(ElemT));
+    RealT *E = (RealT *)malloc(num_block * sizeof(RealT));
+    char jobz = 'V';
+    char uplo = 'U';
+    int nb = num_block;
+    MPI_Datatype DataH = GetMpiType<ElemT>::MpiT;
+
+    bool do_continue = true;
+    std::vector<double> onestep_times(num_block * max_iteration, 0.0);
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    for (int it = 0; it < max_iteration; it++) {
+        std::copy(W_cpu.begin(), W_cpu.end(), C[0].begin());
+
+        for (int ib = 0; ib < nb; ib++) {
+            auto step_start = std::chrono::high_resolution_clock::now();
+
+            // Stage trial vector to HBM, run mult, copy sigma back to LPDDR5X
+            thrust::copy(C[ib].begin(), C[ib].end(), C_dev.begin());
+            thrust::fill(HC_dev.begin(), HC_dev.end(), ElemT(0));
+            mult.run(hii, C_dev, HC_dev);
+            thrust::copy(HC_dev.begin(), HC_dev.end(), HC[ib].begin());
+
+            // Projected Hamiltonian elements — CPU InnerProduct from dm_vector.h
+            for (int jb = 0; jb <= ib; jb++) {
+                InnerProduct(C[jb], HC[ib], H[jb + nb * ib], mult.b_comm());
+                H[ib + nb * jb] = Conjugate(H[jb + nb * ib]);
+            }
+            for (int jb = 0; jb <= ib; jb++)
+                for (int kb = 0; kb <= ib; kb++)
+                    U[jb + nb * kb] = H[jb + nb * kb];
+
+#ifdef SBD_NO_LAPACK
+            hp_numeric::JacobiHeev(ib + 1, U, nb, E);
+#else
+            hp_numeric::MatHeev(jobz, uplo, ib + 1, U, nb, E);
+#endif
+
+            // Ritz vector W_cpu = sum_kb U[kb] * C[kb]
+            {
+                ElemT a0 = U[0];
+                #pragma omp parallel for schedule(static)
+                for (size_t is = 0; is < n; is++) W_cpu[is] = a0 * C[0][is];
+            }
+            for (int kb = 1; kb <= ib; kb++) {
+                ElemT ak = U[kb];
+                #pragma omp parallel for schedule(static)
+                for (size_t is = 0; is < n; is++) W_cpu[is] += ak * C[kb][is];
+            }
+
+            // Residual R_cpu = E[0]*W_cpu - sum_kb U[kb]*HC[kb]
+            {
+                ElemT a0 = ElemT(-1.0) * U[0];
+                #pragma omp parallel for schedule(static)
+                for (size_t is = 0; is < n; is++) R_cpu[is] = a0 * HC[0][is];
+            }
+            for (int kb = 1; kb <= ib; kb++) {
+                ElemT ak = ElemT(-1.0) * U[kb];
+                #pragma omp parallel for schedule(static)
+                for (size_t is = 0; is < n; is++) R_cpu[is] += ak * HC[kb][is];
+            }
+            {
+                ElemT e0 = ElemT(E[0]);
+                #pragma omp parallel for schedule(static)
+                for (size_t is = 0; is < n; is++) R_cpu[is] += e0 * W_cpu[is];
+            }
+
+            // Stability patch (mirrors GPU Davidson Fugaku patch)
+            if (mpi_size_t > 1) {
+                MPI_Allreduce(MPI_IN_PLACE, W_cpu.data(), (int)n, DataH, MPI_SUM, mult.t_comm());
+                MPI_Allreduce(MPI_IN_PLACE, R_cpu.data(), (int)n, DataH, MPI_SUM, mult.t_comm());
+            }
+            if (mpi_size_h > 1) {
+                MPI_Allreduce(MPI_IN_PLACE, W_cpu.data(), (int)n, DataH, MPI_SUM, mult.h_comm());
+                MPI_Allreduce(MPI_IN_PLACE, R_cpu.data(), (int)n, DataH, MPI_SUM, mult.h_comm());
+            }
+            if (mpi_size_h * mpi_size_t > 1) {
+                ElemT volp(1.0 / (mpi_size_h * mpi_size_t));
+                #pragma omp parallel for schedule(static)
+                for (size_t is = 0; is < n; is++) { W_cpu[is] *= volp; R_cpu[is] *= volp; }
+            }
+
+            // Normalize — CPU version from dm_vector.h (std::vector overload)
+            RealT norm_W, norm_R;
+            Normalize(W_cpu, norm_W, mult.b_comm());
+            Normalize(R_cpu, norm_R, mult.b_comm());
+
+#ifdef SBD_DEBUG_DAVIDSON
+            std::cout << " DavidsonCPU iteration " << it << "." << ib
+                        << " at mpi (h,b,t) = ("
+                        << mpi_rank_h << "," << mpi_rank_b << ","
+                        << mpi_rank_t << "): (tol=" << norm_R << "):";
+            for (int p = 0; p < std::min(ib + 1, 4); p++)
+                std::cout << " " << E[p];
+            std::cout << std::endl;
+#else
+            if (mpi_rank_h == 0 && mpi_rank_t == 0 && mpi_rank_b == 0) {
+                std::cout << " Davidson iteration " << it << "." << ib
+                            << " (tol=" << norm_R << "):";
+                for (int p = 0; p < std::min(ib + 1, 4); p++)
+                    std::cout << " " << E[p];
+                std::cout << std::endl;
+            }
+#endif
+
+            if (norm_R < eps) {
+                do_continue = false;
+                break;
+            }
+
+            if (ib < nb - 1) {
+                // Determine: preconditioned correction vector
+                ElemT e0 = ElemT(E[0]);
+                #pragma omp parallel for schedule(static)
+                for (size_t is = 0; is < n; is++) {
+                    auto denom = e0 - dii_cpu[is];
+                    if (SquaredNorm(denom) > eps_reg * eps_reg)
+                        C[ib + 1][is] = R_cpu[is] / denom;
+                    else
+                        C[ib + 1][is] = R_cpu[is] / (denom - ElemT(eps_reg));
+                }
+
+                // Gram-Schmidt orthogonalization
+                for (int kb = 0; kb < ib + 1; kb++) {
+                    ElemT olap;
+                    InnerProduct(C[kb], C[ib + 1], olap, mult.b_comm());
+                    olap *= ElemT(-1.0);
+                    #pragma omp parallel for schedule(static)
+                    for (size_t is = 0; is < n; is++) C[ib + 1][is] += olap * C[kb][is];
+                }
+
+                RealT norm_C;
+                Normalize(C[ib + 1], norm_C, mult.b_comm());
+            }
+
+            auto step_end = std::chrono::high_resolution_clock::now();
+            onestep_times[it * nb + ib] = std::chrono::duration<double>(step_end - step_start).count();
+            double ave_time_per_step = 0.0;
+            for (int ks = 0; ks <= it * nb + ib; ks++)
+                ave_time_per_step += onestep_times[ks];
+            ave_time_per_step /= (it * nb + ib + 1);
+
+            auto current_time = std::chrono::high_resolution_clock::now();
+            double total_elapsed = std::chrono::duration<double>(current_time - start_time).count();
+            double predicted_next_end = total_elapsed + ave_time_per_step;
+            if (mpi_rank_h == 0) {
+                if (mpi_rank_t == 0)
+                    MPI_Bcast(&predicted_next_end, 1, MPI_DOUBLE, 0, mult.b_comm());
+                MPI_Bcast(&predicted_next_end, 1, MPI_DOUBLE, 0, mult.t_comm());
+            }
+            MPI_Bcast(&predicted_next_end, 1, MPI_DOUBLE, 0, mult.h_comm());
+
+            if (predicted_next_end > max_time) {
+                do_continue = false;
+                break;
+            }
+
+        } // end for(int ib ...)
+
+        if (!do_continue) break;
+
+    } // end for(int it ...)
+
+    std::copy(W_cpu.begin(), W_cpu.end(), W.begin());
+
+    free(H);
+    free(U);
+    free(E);
+}
 
 }
 
