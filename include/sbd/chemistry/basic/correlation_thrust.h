@@ -128,14 +128,41 @@ public:
         int ob = B / 2;
         int sb = B % 2;
 
-        if (si == sa) {
-            sbd::atomic_add(twobody + (si + 2 * sj) * twobody_size + (oa + this->norbs * ob + this->norbs * this->norbs * (oi + this->norbs * oj)), ElemT(sgn) * Conjugate(WeightI) * WeightJ);
-            sbd::atomic_add(twobody + (sj + 2 * si) * twobody_size + (ob + this->norbs * oa + this->norbs * this->norbs * (oj + this->norbs * oi)), ElemT(sgn) * Conjugate(WeightI) * WeightJ);
-        }
+        if (si != sj) {
+            // Opposite-spin double excitation (ab/ba blocks). The sorted-index pairing (I->A),(J->B)
+            // above pairs across spins here, and computing both parities on the unchanged bra `det`
+            // is inconsistent with the spin-resolved RDM scatter -> wrong off-diagonal sign. Recompute
+            // the sign with spin-consistent pairing (alpha-cr<->alpha-an, beta-cr<->beta-an) and the
+            // intermediate determinant, expressed purely on `det`:
+            //   mmid == det with only bCr cleared / bAn set (endpoints of the 2nd interval), so
+            //   parity(mmid,bCr..bAn) == parity(det,bCr..bAn); and parity(mJ,aCr..aAn) ==
+            //   parity(det,aCr..aAn) with a (-1) per bCr/bAn strictly inside (aCr,aAn).
+            // (i,j) are the two creations and (a,b) the two annihilations; identify each by spin.
+            int aCr = (i % 2 == 0) ? i : j;   // alpha creation
+            int bCr = (i % 2 == 0) ? j : i;   // beta  creation
+            int aAn = (a % 2 == 0) ? a : b;   // alpha annihilation
+            int bAn = (a % 2 == 0) ? b : a;   // beta  annihilation
+            int p1 = std::min(aCr, aAn), q1 = std::max(aCr, aAn);
+            int p2 = std::min(bCr, bAn), q2 = std::max(bCr, bAn);
+            double s = 1.0;
+            this->parity(det, p1, q1, s);
+            if (p1 < bCr && bCr < q1) s *= -1.0;
+            if (p1 < bAn && bAn < q1) s *= -1.0;
+            this->parity(det, p2, q2, s);
+            int oaC = aCr / 2, oaA = aAn / 2, obC = bCr / 2, obA = bAn / 2;
+            sbd::atomic_add(twobody + 2 * twobody_size + (oaC + this->norbs * obC + this->norbs * this->norbs * (oaA + this->norbs * obA)), ElemT(s) * Conjugate(WeightI) * WeightJ);
+            sbd::atomic_add(twobody + 1 * twobody_size + (obC + this->norbs * oaC + this->norbs * this->norbs * (obA + this->norbs * oaA)), ElemT(s) * Conjugate(WeightI) * WeightJ);
+        } else {
+            // Same-spin double excitation (aa/bb blocks): original scatter is correct.
+            if (si == sa) {
+                sbd::atomic_add(twobody + (si + 2 * sj) * twobody_size + (oa + this->norbs * ob + this->norbs * this->norbs * (oi + this->norbs * oj)), ElemT(sgn) * Conjugate(WeightI) * WeightJ);
+                sbd::atomic_add(twobody + (sj + 2 * si) * twobody_size + (ob + this->norbs * oa + this->norbs * this->norbs * (oj + this->norbs * oi)), ElemT(sgn) * Conjugate(WeightI) * WeightJ);
+            }
 
-        if (si == sb) {
-            sbd::atomic_add(twobody + (si + 2 * sj) * twobody_size + (oa + this->norbs * ob + this->norbs * this->norbs * (oj + this->norbs * oi)), ElemT(-sgn) * Conjugate(WeightI) * WeightJ);
-            sbd::atomic_add(twobody + (sj + 2 * si) * twobody_size + (ob + this->norbs * oa + this->norbs * this->norbs * (oi + this->norbs * oj)), ElemT(-sgn) * Conjugate(WeightI) * WeightJ);
+            if (si == sb) {
+                sbd::atomic_add(twobody + (si + 2 * sj) * twobody_size + (oa + this->norbs * ob + this->norbs * this->norbs * (oj + this->norbs * oi)), ElemT(-sgn) * Conjugate(WeightI) * WeightJ);
+                sbd::atomic_add(twobody + (sj + 2 * si) * twobody_size + (ob + this->norbs * oa + this->norbs * this->norbs * (oi + this->norbs * oj)), ElemT(-sgn) * Conjugate(WeightI) * WeightJ);
+            }
         }
     }
 };
