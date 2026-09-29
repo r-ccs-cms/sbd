@@ -4,6 +4,7 @@
 #include "sbd/caop/spectrum/applied_operator.h"
 #include "sbd/framework/sparse_solver/block_lanczos.h"
 #include "sbd/caop/basic/helper.h"
+#include "sbd/caop/basic/arithmetic.h"
 #include "sbd/caop/basic/mult.h"
 #include <cmath>
 #include <cstddef>
@@ -30,8 +31,22 @@ struct SpectrumProgress {
   ss::LanczosProgress iteration;
 };
 using SpectrumProgressCallback=std::function<void(const SpectrumProgress&)>;
-// CAOP response using the existing single-vector Hamiltonian operations.
-// Convert seeds once after distribution; iteration operates directly on V[v][i].
+/**
+ * @brief Construct CAOP response coefficients on the original h/b/t grid.
+ *
+ * The reference state, extra basis and full applied operators are supplied on
+ * h_rank=t_rank=0 (distributed over b). Pass a non-null applied_operators pointer
+ * on every rank for general operators; its contents on other ranks are ignored.
+ * Parent rows and amplitudes are further scattered over h and t for seed
+ * generation. Every worker applies every operator to its own parent shard.
+ * Contributions are summed per determinant and observable, then the completed
+ * b-owned basis and seed block are replicated over h/t. QR, Hamiltonian setup
+ * and Lanczos use the original communicators, without changing their membership.
+ * Input objects are not modified. All grid ranks must call this function with
+ * matching options, observable order and operator mode.
+ *
+ * @param on_progress Optional observer on every rank; no library output by default.
+ */
 template<class ElemT>
 inline SpectrumResult<ElemT> spectrum(const Wavefunction<ElemT>& state,const sbd::GeneralOp<ElemT>& h,bool fermion,
     const std::vector<std::size_t>& orbitals,bool addition,std::size_t sites,std::size_t bits,
@@ -65,11 +80,30 @@ inline SpectrumResult<ElemT> spectrum(const Wavefunction<ElemT>& state,const sbd
   if(!std::isfinite(norm)||std::abs(norm-1)>1e-8||!std::isfinite(reference_energy)) throw std::invalid_argument("normalized reference state and finite energy required");
   if(!sites||!bits||bits>8*sizeof(std::size_t)||((h.NumOpTerms()||h.NumNcTerms()) && std::size_t(h.max_index())>=sites))
     throw std::invalid_argument("Hamiltonian/bit dimensions");
-  SeedSpace<ElemT> seeds;
-  if(h_rank==0 && t_rank==0)
-    seeds=applied_operators
-      ?general_operator_seeds(state,*applied_operators,fermion,sites,bits,extra,b_comm)
-      :single_particle_seeds(state,orbitals,addition,fermion,sites,bits,extra,b_comm);
+  // Reuse h/t as additional parent partitions during operator application.
+  // Each b shard is scattered over h, then t; the Hamiltonian communicators
+  // and the final b ownership are unchanged.
+  Wavefunction<ElemT> parents;
+  if(t_rank==0) parents=detail::scatter_parents(state,h_comm);
+  parents=detail::scatter_parents(parents,t_comm);
+  std::vector<sbd::GeneralOp<ElemT>> operators;
+  if(applied_operators) {
+    if(h_rank==0 && t_rank==0) operators=*applied_operators;
+    std::size_t count=operators.size();
+    if(t_rank==0) MPI_Bcast(&count,1,SBD_MPI_SIZE_T,0,h_comm);
+    MPI_Bcast(&count,1,SBD_MPI_SIZE_T,0,t_comm);
+    operators.resize(count);
+    for(auto& op:operators) {
+      if(t_rank==0) sbd::MpiBcast(op,0,h_comm);
+      sbd::MpiBcast(op,0,t_comm);
+    }
+  }
+  auto seeds=applied_operators
+    ?general_operator_seeds(parents,operators,fermion,sites,bits,extra,b_comm,h_comm,t_comm)
+    :single_particle_seeds(parents,orbitals,addition,fermion,sites,bits,extra,b_comm,h_comm,t_comm);
+  // The completed seed block exists on h=t=0; release temporary input shards
+  // before replicating the final basis and all seed columns over h/t.
+  parents=Wavefunction<ElemT>{};operators.clear();
   if(applied_operators && !addition) throw std::invalid_argument("general operators require positive resolvent");
   progress.generated_basis_size=seeds.generated_basis_size;
   if(t_rank==0) {

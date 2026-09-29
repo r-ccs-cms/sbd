@@ -91,7 +91,7 @@ def case(label,operators,files=None,channel=None,fermion=True,ranks=4,hs=1,ts=1,
     return args
 
 backend='stored'
-for ranks,hs,ts,shards,threads in [(1,1,1,2,1),(2,1,1,1,2),(4,1,1,2,3),(4,2,1,1,2),(4,1,2,2,3),(4,2,2,1,2)]:
+for ranks,hs,ts,shards,threads in [(1,1,1,2,1),(2,1,1,1,2),(4,1,1,2,3),(4,2,1,1,2),(4,1,2,2,3),(4,2,2,1,2),(8,2,2,2,2)]:
     label=f'{backend}-{ranks}-{hs}-{ts}'
     args=case(label,ops,files=[work/f'fermion-op{v}.txt' for v in range(len(ops))],ranks=ranks,hs=hs,ts=ts,shards=shards,threads=threads)
 for channel in ['addition','removal']:

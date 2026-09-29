@@ -24,6 +24,11 @@ if(SBD_BUILD_SPECTRUM_TESTS)
     set_tests_properties(spectrum_geometry_${label} PROPERTIES
       ENVIRONMENT "OMP_NUM_THREADS=3;OPENBLAS_NUM_THREADS=1" PROCESSORS 12 TIMEOUT 120)
   endforeach()
+  add_test(NAME spectrum_geometry_2_2_2
+    COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 8
+      ${MPIEXEC_PREFLAGS} $<TARGET_FILE:spectrum_test_local_basis> ${MPIEXEC_POSTFLAGS} 2 2)
+  set_tests_properties(spectrum_geometry_2_2_2 PROPERTIES
+    ENVIRONMENT "OMP_NUM_THREADS=2;OPENBLAS_NUM_THREADS=1" PROCESSORS 16 TIMEOUT 120)
   add_test(NAME spectrum_cli
     COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cli.sh
       $<TARGET_FILE:caop-spectrum> $<TARGET_FILE:spectrum_test_checkpoint_io>)

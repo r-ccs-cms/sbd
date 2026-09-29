@@ -74,8 +74,15 @@ terms and computes other contributions during H application. Both operate on
 the same fixed selected basis. `--h-comm-size H` and `--t-comm-size T` default
 to one; H*T must divide the MPI size, and b = MPI size/(H*T). Basis ownership is
 distributed over b, H terms over h, and multiplication tasks over t. Gram/norm
-reductions count only the unique b rows. Input and seed generation run on h=t=0;
-only the completed excitation basis and seed blocks are replicated over h/t.
+reductions count only the unique b rows. Checkpoint input is read on h=t=0.
+During seed generation each b shard of parent determinants and amplitudes is
+further partitioned over h and t; every rank applies all observable operators
+to its own parents. Operator terms and seed columns are not partitioned.
+Contributions are routed to their b hash owner, then summed by determinant and
+column over t and h. The completed excitation basis and all seed columns are
+replicated over h/t before QR and Hamiltonian operations. These later operations
+use the original h/b/t communicators and ownership. General operators are
+replicated on all ranks for seed generation; the full parent state is not.
 
 ## Runtime logging
 
