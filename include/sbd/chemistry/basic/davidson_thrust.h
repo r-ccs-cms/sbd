@@ -687,6 +687,7 @@ void DavidsonCublas(const thrust::device_vector<ElemT> &hii,
 
 #endif // #ifdef SBD_USE_CUBLAS
 
+// cpu_subspace: keep the subspace vectors in host memory (HostSubspace) instead of GPU memory.
 template <typename ElemT, typename RealT>
 void Davidson(const thrust::device_vector<ElemT> &hii,
                 std::vector<ElemT> &W,

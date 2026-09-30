@@ -170,6 +170,7 @@ void LanczosImpl(const thrust::device_vector<ElemT> &hii,
 }
 
 
+// cpu_subspace: keep the subspace vectors in host memory (HostSubspace) instead of GPU memory.
 template <typename ElemT, typename RealT>
 void Lanczos(const thrust::device_vector<ElemT> &hii,
 				std::vector<ElemT> &W,
