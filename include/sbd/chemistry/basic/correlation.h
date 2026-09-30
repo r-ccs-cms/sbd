@@ -226,18 +226,46 @@ namespace sbd {
     int ob = B / 2;
     int sb = B % 2;
 
-    if( si == sa ) {
+    if( si != sj ) {
+      // Opposite-spin double excitation (ab/ba blocks). The sorted-index pairing (I->A),(J->B)
+      // used above pairs across spins here, and computing both parities on the unchanged bra DetI
+      // is inconsistent with the spin-resolved RDM scatter -> wrong off-diagonal sign. Recompute
+      // the sign with spin-consistent pairing and the intermediate determinant (the alpha
+      // excitation applied before the beta parity is counted), expressed purely on DetI:
+      //   mmid == DetI with only bCr cleared / bAn set (endpoints of the 2nd interval), so
+      //   parity(mmid,bCr..bAn) == parity(DetI,bCr..bAn); and parity(mJ,aCr..aAn) ==
+      //   parity(DetI,aCr..aAn) with a (-1) per bCr/bAn strictly inside (aCr,aAn).
+      // (i,j) are the two creations and (a,b) the two annihilations; identify each by spin.
+      int aCr = (i % 2 == 0) ? i : j;   // alpha creation
+      int bCr = (i % 2 == 0) ? j : i;   // beta  creation
+      int aAn = (a % 2 == 0) ? a : b;   // alpha annihilation
+      int bAn = (a % 2 == 0) ? b : a;   // beta  annihilation
+      int p1 = std::min(aCr,aAn), q1 = std::max(aCr,aAn);
+      int p2 = std::min(bCr,bAn), q2 = std::max(bCr,bAn);
+      double s = 1.0;
+      parity(DetI,bit_length,p1,q1,s);
+      if( p1 < bCr && bCr < q1 ) s *= -1.0;
+      if( p1 < bAn && bAn < q1 ) s *= -1.0;
+      parity(DetI,bit_length,p2,q2,s);
+      int oaC = aCr/2, oaA = aAn/2, obC = bCr/2, obA = bAn/2;
 #pragma omp atomic update
-      twobody[si+2*sj][oa+norb*ob+norb*norb*(oi+norb*oj)] += ElemT(sgn) * Conjugate(WeightI) * WeightJ;
+      twobody[2][oaC+norb*obC+norb*norb*(oaA+norb*obA)] += ElemT(s) * Conjugate(WeightI) * WeightJ;
 #pragma omp atomic update
-      twobody[sj+2*si][ob+norb*oa+norb*norb*(oj+norb*oi)] += ElemT(sgn) * Conjugate(WeightI) * WeightJ;
-    }
-
-    if( si == sb ) {
+      twobody[1][obC+norb*oaC+norb*norb*(obA+norb*oaA)] += ElemT(s) * Conjugate(WeightI) * WeightJ;
+    } else {
+      // Same-spin double excitation (aa/bb blocks): original scatter is correct.
+      if( si == sa ) {
 #pragma omp atomic update
-      twobody[si+2*sj][oa+norb*ob+norb*norb*(oj+norb*oi)] += ElemT(-sgn) * Conjugate(WeightI) * WeightJ;
+        twobody[si+2*sj][oa+norb*ob+norb*norb*(oi+norb*oj)] += ElemT(sgn) * Conjugate(WeightI) * WeightJ;
 #pragma omp atomic update
-      twobody[sj+2*si][ob+norb*oa+norb*norb*(oi+norb*oj)] += ElemT(-sgn) * Conjugate(WeightI) * WeightJ;
+        twobody[sj+2*si][ob+norb*oa+norb*norb*(oj+norb*oi)] += ElemT(sgn) * Conjugate(WeightI) * WeightJ;
+      }
+      if( si == sb ) {
+#pragma omp atomic update
+        twobody[si+2*sj][oa+norb*ob+norb*norb*(oj+norb*oi)] += ElemT(-sgn) * Conjugate(WeightI) * WeightJ;
+#pragma omp atomic update
+        twobody[sj+2*si][ob+norb*oa+norb*norb*(oi+norb*oj)] += ElemT(-sgn) * Conjugate(WeightI) * WeightJ;
+      }
     }
 
   }
@@ -275,18 +303,39 @@ namespace sbd {
     int ob = B / 2;
     int sb = B % 2;
 
-    if( si == sa ) {
+    if( si != sj ) {
+      // Opposite-spin double (ab/ba blocks): recompute the sign with spin-consistent pairing and
+      // the intermediate determinant, expressed purely on DetI (see host TwoDiffCorrelation above).
+      int aCr = (i % 2 == 0) ? i : j;   // alpha creation
+      int bCr = (i % 2 == 0) ? j : i;   // beta  creation
+      int aAn = (a % 2 == 0) ? a : b;   // alpha annihilation
+      int bAn = (a % 2 == 0) ? b : a;   // beta  annihilation
+      int p1 = std::min(aCr,aAn), q1 = std::max(aCr,aAn);
+      int p2 = std::min(bCr,bAn), q2 = std::max(bCr,bAn);
+      double s = 1.0;
+      parity_device(DetI,bit_length,p1,q1,s);
+      if( p1 < bCr && bCr < q1 ) s *= -1.0;
+      if( p1 < bAn && bAn < q1 ) s *= -1.0;
+      parity_device(DetI,bit_length,p2,q2,s);
+      int oaC = aCr/2, oaA = aAn/2, obC = bCr/2, obA = bAn/2;
 #pragma omp atomic update
-      twoBody[(si+2*sj)*norb4 + oa+norb*ob+norb*norb*(oi+norb*oj)] += ElemT(sgn) * Conjugate(WeightI) * WeightJ;
+      twoBody[2*norb4 + oaC+norb*obC+norb*norb*(oaA+norb*obA)] += ElemT(s) * Conjugate(WeightI) * WeightJ;
 #pragma omp atomic update
-      twoBody[(sj+2*si)*norb4 + ob+norb*oa+norb*norb*(oj+norb*oi)] += ElemT(sgn) * Conjugate(WeightI) * WeightJ;
-    }
-
-    if( si == sb ) {
+      twoBody[1*norb4 + obC+norb*oaC+norb*norb*(obA+norb*oaA)] += ElemT(s) * Conjugate(WeightI) * WeightJ;
+    } else {
+      // Same-spin double (aa/bb blocks): original scatter is correct.
+      if( si == sa ) {
 #pragma omp atomic update
-      twoBody[(si+2*sj)*norb4 + oa+norb*ob+norb*norb*(oj+norb*oi)] += ElemT(-sgn) * Conjugate(WeightI) * WeightJ;
+        twoBody[(si+2*sj)*norb4 + oa+norb*ob+norb*norb*(oi+norb*oj)] += ElemT(sgn) * Conjugate(WeightI) * WeightJ;
 #pragma omp atomic update
-      twoBody[(sj+2*si)*norb4 + ob+norb*oa+norb*norb*(oi+norb*oj)] += ElemT(-sgn) * Conjugate(WeightI) * WeightJ;
+        twoBody[(sj+2*si)*norb4 + ob+norb*oa+norb*norb*(oj+norb*oi)] += ElemT(sgn) * Conjugate(WeightI) * WeightJ;
+      }
+      if( si == sb ) {
+#pragma omp atomic update
+        twoBody[(si+2*sj)*norb4 + oa+norb*ob+norb*norb*(oj+norb*oi)] += ElemT(-sgn) * Conjugate(WeightI) * WeightJ;
+#pragma omp atomic update
+        twoBody[(sj+2*si)*norb4 + ob+norb*oa+norb*norb*(oi+norb*oj)] += ElemT(-sgn) * Conjugate(WeightI) * WeightJ;
+      }
     }
 
   }
