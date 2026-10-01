@@ -1,5 +1,9 @@
 add_executable(caop-spectrum main.cc cli_options.h)
-sbd_configure_cpu(caop-spectrum)
+if(SBD_GPU_BACKEND STREQUAL "thrust")
+  sbd_configure_diag(caop-spectrum "${SBD_CAOP_THRUST_MEMORY_MODE}")
+else()
+  sbd_configure_cpu(caop-spectrum)
+endif()
 
 if(SBD_BUILD_SPECTRUM_TESTS)
   foreach(name IN ITEMS checkpoint_io local_basis)

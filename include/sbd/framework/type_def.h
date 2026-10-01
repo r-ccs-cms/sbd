@@ -7,6 +7,8 @@
 #define SBD_FRAMEWORK_TYPE_DEF_H
 
 #include <complex>
+#include <cstddef>
+#include <cstdint>
 #include <limits.h>
 #include <cassert>
 
