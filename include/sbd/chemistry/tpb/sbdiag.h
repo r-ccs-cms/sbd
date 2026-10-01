@@ -459,16 +459,12 @@ namespace sbd {
 #ifdef SBD_THRUST
 	if( method == 0 ) {
             SBD_NVTX_RANGE_COLOR("Davidson", __LINE__);
-            if (sbd_data.cpu_subspace)
-                sbd::DavidsonCPUSubspace(hii, W, device_mult,
-                                         max_it,max_nb,eps,max_time);
-            else
-                sbd::Davidson(hii, W, device_mult,
-                              max_it,max_nb,eps,max_time);
+            sbd::Davidson(hii, W, device_mult,
+                          max_it,max_nb,eps,max_time,sbd_data.cpu_subspace);
 	} else {
             SBD_NVTX_RANGE_COLOR("Lanczos", __LINE__);
             sbd::Lanczos(hii, W, device_mult,
-                         max_it,max_nb,eps);
+                         max_it,max_nb,eps,sbd_data.cpu_subspace);
 	}
 #else
 	if( method == 0 ) {
@@ -600,10 +596,10 @@ namespace sbd {
 #ifdef SBD_THRUST
 	if( method == 1 ) {
 		sbd::Davidson(hii, W, device_mult,
-				max_it,max_nb,eps,max_time);
+				max_it,max_nb,eps,max_time,sbd_data.cpu_subspace);
 	} else {
 		sbd::Lanczos(hii, W, device_mult,
-				max_it,max_nb,eps);
+				max_it,max_nb,eps,sbd_data.cpu_subspace);
 	}
 #else
 	if( method == 1 ) {

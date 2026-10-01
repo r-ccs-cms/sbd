@@ -9,6 +9,7 @@
 #include "sbd/framework/determinant_initialization.h"
 #include "sbd/framework/determinant_distribution_round_robin.h"
 #include "sbd/caop/basic/expansion.h"
+#include <omp.h>
 
 namespace sbd {
   namespace caop {
@@ -227,6 +228,21 @@ namespace sbd {
         return result;
       }
     } // namespace detail
+
+    // The Davidson/Lanczos subspace lives in host memory in every build, and
+    // its vector operations run on OpenMP threads; in GPU builds one thread
+    // leaves the CPU side ~5x slower (job 3265610), so require more.
+    inline void RequireOpenMPThreads(const MPI_Comm & comm) {
+#ifdef SBD_THRUST
+      if (omp_get_max_threads() == 1) {
+        int mpi_rank; MPI_Comm_rank(comm,&mpi_rank);
+        if (mpi_rank == 0)
+          std::cerr << "Error: omp_get_max_threads() == 1; host-side work needs "
+                       "OpenMP threads > 1. Set OMP_NUM_THREADS (and srun --cpus-per-task).\n";
+        MPI_Abort(comm, 1);
+      }
+#endif
+    }
     
     template <typename ElemT>
     void diag(const MPI_Comm & comm,
@@ -238,6 +254,7 @@ namespace sbd {
 	      double & energy,
 	      det_vector<size_t> & co_basis) {
       
+      RequireOpenMPThreads(comm);
       int mpi_master = 0;
       int mpi_rank; MPI_Comm_rank(comm,&mpi_rank);
       int mpi_size; MPI_Comm_size(comm,&mpi_size);
@@ -537,6 +554,7 @@ namespace sbd {
 	      double & energy,
 	      det_vector<size_t> & co_basis) {
 
+      RequireOpenMPThreads(comm);
       int mpi_master = 0;
       int mpi_rank; MPI_Comm_rank(comm,&mpi_rank);
       int mpi_size; MPI_Comm_size(comm,&mpi_size);

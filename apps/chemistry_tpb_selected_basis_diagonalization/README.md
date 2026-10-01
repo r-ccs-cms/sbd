@@ -106,3 +106,13 @@ Below is an explanation of each command-line option.
   Whether to compute the 1-particle and 2-particle reduced density matrices (1pRDM and 2pRDM). If set to 0, they are not computed; otherwise, they are computed.
 - `--bit_length <int>`:  
   Specifies the bit length handled by each size_t when representing bitstrings using `std::vector<size_t>`. The default value is 20.
+- `--cpu_subspace <int>`:
+  GPU (Thrust) builds only. If set to 1, the subspace vectors of the Davidson or Lanczos solver are kept in CPU memory instead of GPU memory (default: 0).
+  The Hamiltonian is still applied on the GPU: each vector is copied through two GPU buffers, so the GPU memory used by the subspace no longer grows with `--block`.
+  Operations on the subspace vectors run on the CPU with OpenMP (GPU builds of this app require more than one OpenMP thread in any case; see below).
+  Energies agree with the default to within rounding.
+
+### OpenMP threads in GPU builds
+
+GPU (Thrust) builds do part of the setup, such as building the helper structures, on the CPU with OpenMP, and abort at startup if `OMP_NUM_THREADS` is 1.
+Set `OMP_NUM_THREADS` greater than 1, and give each MPI rank that many cores (for example with `srun --cpus-per-task`).

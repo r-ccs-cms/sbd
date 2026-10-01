@@ -95,6 +95,15 @@ over all ranks and are reported for parent truncation, parent redistribution,
 lookup construction, local generation, global sort/unique, final
 redistribution, and the complete carryover operation.
 
+### OpenMP threads in GPU builds
+
+The Davidson and Lanczos solvers keep their subspace vectors in CPU memory in
+every build and run the operations on them with OpenMP; only the Hamiltonian is
+applied on the GPU. GPU (Thrust) builds therefore abort at startup if
+`OMP_NUM_THREADS` is 1. Set `OMP_NUM_THREADS` greater than 1, and give each MPI
+rank that many cores (for example with `srun --cpus-per-task`). CPU-only builds
+are not checked, so MPI-only runs with one thread per rank remain possible.
+
 ---
 
 ## `gen_ham.py` — Hamiltonian Generator for Extended Hard-Core Boson Models

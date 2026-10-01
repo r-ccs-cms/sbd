@@ -130,6 +130,13 @@ Below is an explanation of each command-line option.
   `grid-cyclic-balanced`. Their product must equal `b_comm_size`; both must be
   specified together. Without an override, the dimensions default to the
   factor pair of `b_comm_size` closest to a square.
+- `--cpu_subspace <int>`:
+  GPU (Thrust) builds only. If set to 1, the Davidson subspace vectors are kept
+  in CPU memory instead of GPU memory (default: 0). The Hamiltonian is still
+  applied on the GPU: each vector is copied through two GPU buffers, so the GPU
+  memory used by the subspace no longer grows with `--block`. Operations on the
+  subspace vectors run on the CPU with OpenMP; the program aborts if
+  `OMP_NUM_THREADS` is 1. Energies agree with the default to within rounding.
 
 ### Distribution trade-offs
 
