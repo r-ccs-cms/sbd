@@ -166,7 +166,8 @@ namespace sbd {
 	      det_vector<size_t, det_kind::half> & co_adet,
 	      det_vector<size_t, det_kind::half> & co_bdet,
 	      std::vector<std::vector<double>> & one_p_rdm,
-	      std::vector<std::vector<double>> & two_p_rdm) {
+	      std::vector<std::vector<double>> & two_p_rdm,
+	      std::vector<double> * W_out = nullptr) {
 
       int mpi_master = 0;
       int mpi_rank; MPI_Comm_rank(comm,&mpi_rank);
@@ -832,6 +833,7 @@ namespace sbd {
 			 h_comm,b_comm,t_comm,W);
       }
 
+      if( W_out ) *W_out = W;
       FreeHelpers(helper);
 
 #ifdef SBD_USE_NCCL
@@ -874,7 +876,8 @@ namespace sbd {
 	      det_vector<size_t, det_kind::half> & co_adet,
 	      det_vector<size_t, det_kind::half> & co_bdet,
 	      std::vector<std::vector<double>> & one_p_rdm,
-	      std::vector<std::vector<double>> & two_p_rdm) {
+	      std::vector<std::vector<double>> & two_p_rdm,
+	      std::vector<double> * W_out = nullptr) {
 
       int mpi_master = 0;
       int mpi_rank; MPI_Comm_rank(comm,&mpi_rank);
@@ -956,7 +959,7 @@ namespace sbd {
       diag(comm,sbd_data,fcidump,adet,bdet,
 	   loadname,savename,
 	   energy,density,co_adet,co_bdet,
-	   one_p_rdm,two_p_rdm);
+	   one_p_rdm,two_p_rdm,W_out);
 
     } // end diag for file-name version
 

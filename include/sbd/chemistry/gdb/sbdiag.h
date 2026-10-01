@@ -197,7 +197,8 @@ namespace sbd {
 	      std::vector<double> & density,
 	      sbd::det_vector<size_t> & rdet,
 	      std::vector<std::vector<ElemT>> & one_p_rdm,
-	      std::vector<std::vector<ElemT>> & two_p_rdm) {
+	      std::vector<std::vector<ElemT>> & two_p_rdm,
+	      std::vector<ElemT> * w_out = nullptr) {
       int mpi_master = 0;
       int mpi_rank; MPI_Comm_rank(comm,&mpi_rank);
       int mpi_size; MPI_Comm_size(comm,&mpi_size);
@@ -665,6 +666,7 @@ namespace sbd {
 		    << elapsed_save << " (sec)]" << std::endl;
 	}
       }
+      if( w_out ) *w_out = w;
     } // end void diag function
 
     /**
@@ -692,7 +694,8 @@ namespace sbd {
 	      std::vector<double> & density,
 	      sbd::det_vector<size_t> & rdet,
 	      std::vector<std::vector<ElemT>> & one_p_rdm,
-	      std::vector<std::vector<ElemT>> & two_p_rdm) {
+	      std::vector<std::vector<ElemT>> & two_p_rdm,
+	      std::vector<ElemT> * w_out = nullptr) {
       int mpi_master = 0;
       int mpi_rank; MPI_Comm_rank(comm,&mpi_rank);
       int mpi_size; MPI_Comm_size(comm,&mpi_size);
@@ -778,7 +781,7 @@ namespace sbd {
 		  << elapsed_ldet << " (sec)]" << std::endl;
       }
       diag(comm,sbd_data,fcidump,det,loadname,savename,
-	   energy,density,rdet,one_p_rdm,two_p_rdm);
+	   energy,density,rdet,one_p_rdm,two_p_rdm,w_out);
     }
   } // end namespace gdb
 } // end namespace sbd
