@@ -16,6 +16,11 @@ set_property(CACHE SBD_GPU_BACKEND PROPERTY STRINGS none thrust omp5)
 # Architecture token: cc90 (GH200/H100), sm_80 (A100), gfx90a (MI250X), …
 set(SBD_GPU_ARCH "cc90" CACHE STRING "GPU architecture for the chosen backend")
 
+# CAOP explicitly owns device buffers and transfers host vectors to the GPU.
+# Use separate allocations for both CAOP applications by default.
+set(SBD_CAOP_THRUST_MEMORY_MODE "separate" CACHE STRING "CAOP Thrust memory mode: unified | separate")
+set_property(CACHE SBD_CAOP_THRUST_MEMORY_MODE PROPERTY STRINGS unified separate)
+
 # ── Feature flags ─────────────────────────────────────────────────────────────
 option(SBD_NON_CUDA_AWARE_MPI           "Use host-staging for all MPI comm on device memory" OFF)
 option(SBD_THRUST_SAFE_MPI_ALLREDUCE   "Safe Thrust MPI allreduce (subset of NON_CUDA_AWARE_MPI)" OFF)
@@ -90,13 +95,24 @@ function(sbd_configure_diag target)
       $<$<BOOL:${SBD_USE_CUBLAS}>:SBD_USE_CUBLAS>
       $<$<BOOL:${SBD_USE_THRUST_NOSYNC}>:SBD_USE_THRUST_NOSYNC>
     )
+    set(sbd_memory_mode "unified")
+    if(ARGC GREATER 1)
+      set(sbd_memory_mode "${ARGV1}")
+    endif()
+    if(sbd_memory_mode STREQUAL "unified")
+      set(sbd_memory_flags "mem:unified,interceptdeallocations")
+    elseif(sbd_memory_mode STREQUAL "separate")
+      set(sbd_memory_flags "mem:separate,nointerceptdeallocations")
+    else()
+      message(FATAL_ERROR "Unsupported Thrust memory mode: ${sbd_memory_mode}")
+    endif()
     target_compile_options(${target} PRIVATE
       -cuda
-      "-gpu=${SBD_GPU_ARCH},mem:unified,interceptdeallocations"
+      "-gpu=${SBD_GPU_ARCH},${sbd_memory_flags}"
     )
     target_link_options(${target} PRIVATE
       -cuda
-      "-gpu=${SBD_GPU_ARCH},mem:unified,interceptdeallocations"
+      "-gpu=${SBD_GPU_ARCH},${sbd_memory_flags}"
     )
   elseif(SBD_GPU_BACKEND STREQUAL "omp5")
     target_compile_definitions(${target} PRIVATE SBD_TRADMODE USE_OMP_OFFLOAD)
@@ -139,7 +155,7 @@ endif()
 add_subdirectory(apps/gdb-stat-evaluator)
 add_subdirectory(apps/caop-stat-evaluator)
 
-# Spectrum generation is CPU/MPI and supports both scalar types at runtime.
+# Spectrum supports both scalar types at runtime and optional Thrust H application.
 option(SBD_BUILD_SPECTRUM_TESTS "Build block Lanczos and CAOP spectrum tests" OFF)
 if(SBD_BUILD_SPECTRUM_TESTS)
   enable_testing()

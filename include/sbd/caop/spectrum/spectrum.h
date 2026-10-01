@@ -145,6 +145,11 @@ inline SpectrumResult<ElemT> spectrum(const Wavefunction<ElemT>& state,const sbd
   else
     sbd::makeCAOpHamDiagTerms(seeds.basis,bits,slide,h,hii);
   end_stage();
+#ifdef SBD_THRUST
+  // Reuse the same GPU Hamiltonian/basis resources across all columns and steps,
+  // as in CAOP selected-basis diagonalization. Stored multiplication stays CPU.
+  sbd::CaopMultThrust<ElemT> driver;
+#endif
   auto apply_h=[&](const auto& x,auto& y) {
     // Each existing mult owns MPI/OpenMP and adds to its output vector.
     for(std::size_t v=0;v<x.size();++v) {
@@ -152,7 +157,11 @@ inline SpectrumResult<ElemT> spectrum(const Wavefunction<ElemT>& state,const sbd
         sbd::mult(hii,ih,jh,hij,x[v],y[v],slide,h_comm,b_comm,t_comm);
       else
         sbd::mult(hii,x[v],y[v],seeds.basis,int(bits),slide,h,fermion,
-            h_comm,b_comm,t_comm);
+            h_comm,b_comm,t_comm
+#ifdef SBD_THRUST
+            ,driver
+#endif
+            );
     }
   };
   ss::LanczosProgressCallback on_iteration;

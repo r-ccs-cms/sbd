@@ -46,10 +46,11 @@ def run(args,log,success=True):
         result=subprocess.run(args,timeout=60,stdout=out,stderr=subprocess.STDOUT)
     assert (result.returncode==0)==success,log
 maximum=0
-backend='stored'
-for ranks,hs,ts in [(1,1,1),(2,1,1),(4,1,1),(4,2,1),(4,1,2),(4,2,2)]:
+for backend,ranks,hs,ts in [(mode,*geometry) for mode in ('stored','on-the-fly')
+                            for geometry in [(1,1,1),(2,1,1),(4,1,1),(4,2,1),(4,1,2),(4,2,2)]]:
     label=f'{backend}-{ranks}-{hs}-{ts}';output=work/f'{label}.csv';coeff=work/f'{label}.coeff'
     args=mpi_command(ranks,exe)+['--hamfile',str(root/'ham.txt'),'--loadname',str(root/'state-'),'--wavefunction-shards','1','--sites','4','--reference-energy','-1','--applied-operator-type','general','--extra-detfile',str(work/'basis.txt'),'--remap-detfile',str(root/'remap.txt'),'--save-coefficients',str(coeff),'--output',str(output),'--steps','16','--omega-min','-2','--omega-max','3','--points','7','--eta','.17','--h-comm-size',str(hs),'--t-comm-size',str(ts)]
+    args+=['--hamiltonian-mode',backend]
     for v in range(len(ops)):args+=['--operator-file',str(work/f'op{v}.txt')]
     run(args,work/f'{label}.log')
     rows=list(csv.DictReader(output.open()));assert len(rows)==7*len(ops)**2
