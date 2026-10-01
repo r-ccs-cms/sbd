@@ -167,7 +167,8 @@ namespace sbd {
 	      det_vector<size_t, det_kind::half> & co_bdet,
 	      std::vector<std::vector<double>> & one_p_rdm,
 	      std::vector<std::vector<double>> & two_p_rdm,
-	      std::vector<double> * W_out = nullptr) {
+	      std::vector<double> * W_out = nullptr,
+	      std::vector<size_t> * W_range_out = nullptr) {
 
       int mpi_master = 0;
       int mpi_rank; MPI_Comm_rank(comm,&mpi_rank);
@@ -834,6 +835,18 @@ namespace sbd {
       }
 
       if( W_out ) *W_out = W;
+      if( W_range_out ) {
+        // W is this rank's row-major tile of the |adet| x |bdet| matrix, so a
+        // caller needs the global offsets to place it. These are the same values
+        // davidson.h sizes W from, with the same empty-helper guard.
+        W_range_out->assign(4, 0);
+        if( helper.size() != 0 ) {
+          (*W_range_out)[0] = helper[0].braAlphaStart;
+          (*W_range_out)[1] = helper[0].braAlphaEnd;
+          (*W_range_out)[2] = helper[0].braBetaStart;
+          (*W_range_out)[3] = helper[0].braBetaEnd;
+        }
+      }
       FreeHelpers(helper);
 
 #ifdef SBD_USE_NCCL
@@ -877,7 +890,8 @@ namespace sbd {
 	      det_vector<size_t, det_kind::half> & co_bdet,
 	      std::vector<std::vector<double>> & one_p_rdm,
 	      std::vector<std::vector<double>> & two_p_rdm,
-	      std::vector<double> * W_out = nullptr) {
+	      std::vector<double> * W_out = nullptr,
+	      std::vector<size_t> * W_range_out = nullptr) {
 
       int mpi_master = 0;
       int mpi_rank; MPI_Comm_rank(comm,&mpi_rank);
@@ -959,7 +973,7 @@ namespace sbd {
       diag(comm,sbd_data,fcidump,adet,bdet,
 	   loadname,savename,
 	   energy,density,co_adet,co_bdet,
-	   one_p_rdm,two_p_rdm,W_out);
+	   one_p_rdm,two_p_rdm,W_out,W_range_out);
 
     } // end diag for file-name version
 
