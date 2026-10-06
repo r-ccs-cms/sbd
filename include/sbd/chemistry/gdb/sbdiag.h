@@ -39,6 +39,9 @@ namespace sbd {
       std::string determinant_distribution;
       int determinant_grid_a = 0;
       int determinant_grid_b = 0;
+#ifdef SBD_THRUST
+      bool cpu_subspace = false;
+#endif
     };
 
     SBD generate_sbd_data(int argc, char * argv[]) {
@@ -127,6 +130,11 @@ namespace sbd {
 	    std::string(argv[i]) == "--determinant-grid-b" ) {
 	  sbd_data.determinant_grid_b = std::atoi(argv[++i]);
 	}
+#ifdef SBD_THRUST
+	if( std::string(argv[i]) == "--cpu_subspace" ) {
+	  sbd_data.cpu_subspace = std::atoi(argv[++i]) == 1;
+	}
+#endif
       }
       return sbd_data;
     }
@@ -151,6 +159,9 @@ namespace sbd {
       std::cout << "# do basis sort: " << sbd_data.do_sort_det << std::endl;
       std::cout << "# do redistribution of basis: " << sbd_data.do_redist_det << std::endl;
       std::cout << "# do equal-bra_a redistribution: " << sbd_data.do_redist_alpha_eq << std::endl;
+#ifdef SBD_THRUST
+      std::cout << "# cpu_subspace: " << sbd_data.cpu_subspace << std::endl;
+#endif
       if( sbd_data.do_rdm != 0.0 ) {
 	std::cout << "# do rdm: " << sbd_data.do_rdm << std::endl;
       }
@@ -367,7 +378,7 @@ namespace sbd {
 	auto time_start_david = std::chrono::high_resolution_clock::now();
 #ifdef SBD_THRUST
 	sbd::Davidson(hii, w, device_mult,
-			max_it,max_nb,eps,max_time);
+			max_it,max_nb,eps,max_time,sbd_data.cpu_subspace);
 #else
 	Davidson(hii,w,det,bit_length,static_cast<size_t>(L),
 		 idxmap,exidx,I0,I1,I2,

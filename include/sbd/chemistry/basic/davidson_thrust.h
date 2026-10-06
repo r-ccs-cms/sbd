@@ -21,6 +21,7 @@
 
 #include "sbd/framework/thrust_kernels.h"
 #include "sbd/framework/dm_vector.h"
+#include "sbd/chemistry/basic/subspace_thrust.h"
 
 namespace sbd
 {
@@ -32,12 +33,8 @@ struct Determine_kernel {
     ElemT* C;
     ElemT* R;
     ElemT* dii;
-    Determine_kernel(thrust::device_vector<ElemT>& VC, thrust::device_vector<ElemT>& VR, thrust::device_vector<ElemT>& Vd, RealT eps, RealT e) : eps_reg(eps), e0(e)
-    {
-        C = (ElemT*)thrust::raw_pointer_cast(VC.data());
-        R = (ElemT*)thrust::raw_pointer_cast(VR.data());
-        dii = (ElemT*)thrust::raw_pointer_cast(Vd.data());
-    }
+    Determine_kernel(ElemT* VC, ElemT* VR, ElemT* Vd, RealT eps, RealT e)
+        : eps_reg(eps), e0(e), C(VC), R(VR), dii(Vd) {}
     __host__ __device__ void operator()(int is)
     {
         // Use squared comparison to avoid std::abs(complex) which calls hypot
@@ -75,6 +72,31 @@ void GetTotalD_Thrust(const thrust::device_vector<ElemT> & hii,
     }
 }
 
+// Total diagonal in the memory of the subspace (see subspace_thrust.h).
+template <typename ElemT>
+void GetTotalD(const thrust::device_vector<ElemT>& hii,
+               thrust::device_vector<ElemT>& dii, MPI_Comm h_comm)
+{
+    GetTotalD_Thrust(hii, dii, h_comm);
+}
+
+template <typename ElemT>
+void GetTotalD(const thrust::device_vector<ElemT>& hii,
+               std::vector<ElemT>& dii, MPI_Comm h_comm)
+{
+    SBD_NVTX_RANGE_COLOR("GetTotalD", __LINE__);
+    int h_size; MPI_Comm_size(h_comm, &h_size);
+    dii.resize(hii.size());
+    if (h_size == 1) {
+        thrust::copy(hii.begin(), hii.end(), dii.begin());
+    } else {
+        std::vector<ElemT> hii_host(hii.size());
+        thrust::copy(hii.begin(), hii.end(), hii_host.begin());
+        MPI_Datatype DataT = GetMpiType<ElemT>::MpiT;
+        MPI_Allreduce(hii_host.data(), dii.data(), (int)dii.size(), DataT, MPI_SUM, h_comm);
+    }
+}
+
 /**
      Davidson method for the direct multiplication using TaskHelpers, specialized for the SQD loop calculation.
     @tparam ElemT: Type of the Hamiltonian and wave functions
@@ -93,10 +115,11 @@ void GetTotalD_Thrust(const thrust::device_vector<ElemT> & hii,
     @param[in] max_time: Maximum time allowed to perform the calculation
     */
 
-#ifndef SBD_USE_CUBLAS
-
-template <typename ElemT, typename RealT>
-void Davidson(const thrust::device_vector<ElemT> &hii,
+// Davidson body shared by both subspace locations.  Space is DeviceSubspace
+// (vectors in HBM) or HostSubspace (vectors in LPDDR5X, element-wise work on
+// OpenMP threads, mult I/O staged through two HBM buffers).
+template <typename Space, typename ElemT, typename RealT>
+void DavidsonImpl(const thrust::device_vector<ElemT> &hii,
                 std::vector<ElemT> &W,
                 MultBase<ElemT>& mult,
                 int max_iteration,
@@ -105,17 +128,20 @@ void Davidson(const thrust::device_vector<ElemT> &hii,
                 RealT max_time)
 {
     SBD_NVTX_RANGE_COLOR("Davidson", __LINE__);
+    using Vector = typename Space::template vector<ElemT>;
+    Space::check(mult.b_comm());
     RealT eps_reg = 1.0e-12;
 
-    std::vector<thrust::device_vector<ElemT>> C(num_block);
-    std::vector<thrust::device_vector<ElemT>> HC(num_block);
+    std::vector<Vector> C(num_block);
+    std::vector<Vector> HC(num_block);
     for (int i = 0; i < num_block; i++) {
         SBD_NVTX_RANGE_COLOR("for (int i ...", __LINE__ + i);
         C[i].resize(W.size());
         HC[i].resize(W.size());
     }
-    thrust::device_vector<ElemT> R(W.size());
-    thrust::device_vector<ElemT> dii;
+    Vector R(W.size());
+    Vector dii;
+    SubspaceMult<Space, ElemT> smult(mult, hii, W.size());
     int mpi_rank_h;
     MPI_Comm_rank(mult.h_comm(), &mpi_rank_h);
     int mpi_size_h;
@@ -142,7 +168,7 @@ void Davidson(const thrust::device_vector<ElemT> &hii,
     MPI_Datatype DataE = GetMpiType<RealT>::MpiT;
     MPI_Datatype DataH = GetMpiType<ElemT>::MpiT;
 
-    GetTotalD_Thrust(hii, dii, mult.h_comm());
+    GetTotalD(hii, dii, mult.h_comm());
 
 #ifdef SBD_DEBUG_DAVIDSON
     std::cout << " diagonal term at mpi process (h,b,t) = ("
@@ -160,18 +186,10 @@ void Davidson(const thrust::device_vector<ElemT> &hii,
     std::vector<double> onestep_times(num_block * max_iteration, 0.0);
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    cudaStream_t stream = 0;
-    auto policy_nosync = thrust::cuda::par_nosync.on(stream);
-    auto policy_sync = thrust::cuda::par.on(stream);
-    // auto policy_sync = thrust::device;
-#ifdef SBD_USE_THRUST_NOSYNC
-    auto policy = policy_nosync;
-#else
-    auto policy = policy_sync;
-#endif
+    auto policy = Space::policy();
 
     // copyin W
-    thrust::device_vector<ElemT> W_dev(W.size());
+    Vector W_dev(W.size());
     thrust::copy_n(W.begin(), W.size(), W_dev.begin());
 
     for (int it = 0; it < max_iteration; it++) {
@@ -182,13 +200,7 @@ void Davidson(const thrust::device_vector<ElemT> &hii,
             SBD_NVTX_RANGE_COLOR("for (int ib ...", __LINE__ + ib);
             auto step_start = std::chrono::high_resolution_clock::now();
 
-            //Zero(HC[ib]);
-            thrust::fill(HC[ib].begin(), HC[ib].end(), 0);
-
-            {
-                SBD_NVTX_RANGE_COLOR("mult.run", __LINE__);
-                mult.run(hii, C[ib], HC[ib]);
-            }
+            smult.zero(C[ib], HC[ib]);
 
             for (int jb = 0; jb <= ib; jb++) {
                 InnerProduct(C[jb], HC[ib], H[jb + nb * ib], mult.b_comm());
@@ -239,29 +251,30 @@ void Davidson(const thrust::device_vector<ElemT> &hii,
                 // R[is] += E[0] * W[is];
                 thrust::transform(policy, W_dev.begin(), W_dev.end(), R.begin(), R.begin(), AXPY_kernel<ElemT>(E[0]));
             }
-#ifdef SBD_USE_THRUST_NOSYNC
-            cudaStreamSynchronize(stream);
-#endif
+            Space::sync();
 
             /**
                  Patch for stability on Fugaku
                 */
             // #ifdef SBD_FUAGKUPATCH
 #ifdef SBD_USE_NCCL
-            if (mpi_size_a > 1) {
-                nccl_allreduce(W_dev, ncclSum, mult.a_nccl_comm());
-                nccl_allreduce(R, ncclSum, mult.a_nccl_comm());
-            }
-#else
-            if (mpi_size_t > 1) {
-                MpiAllreduce(W_dev, MPI_SUM, mult.t_comm());
-                MpiAllreduce(R, MPI_SUM, mult.t_comm());
-            }
-            if (mpi_size_h > 1) {
-                MpiAllreduce(W_dev, MPI_SUM, mult.h_comm());
-                MpiAllreduce(R, MPI_SUM, mult.h_comm());
-            }
+            if constexpr (Space::on_device) {
+                if (mpi_size_a > 1) {
+                    nccl_allreduce(W_dev, ncclSum, mult.a_nccl_comm());
+                    nccl_allreduce(R, ncclSum, mult.a_nccl_comm());
+                }
+            } else
 #endif
+            {
+                if (mpi_size_t > 1) {
+                    MpiAllreduce(W_dev, MPI_SUM, mult.t_comm());
+                    MpiAllreduce(R, MPI_SUM, mult.t_comm());
+                }
+                if (mpi_size_h > 1) {
+                    MpiAllreduce(W_dev, MPI_SUM, mult.h_comm());
+                    MpiAllreduce(R, MPI_SUM, mult.h_comm());
+                }
+            }
             if (mpi_size_h * mpi_size_t > 1) {
                 ElemT volp(1.0 / (mpi_size_h * mpi_size_t));
                 {
@@ -276,9 +289,7 @@ void Davidson(const thrust::device_vector<ElemT> &hii,
                     // thrust::transform(thrust::device, R.begin(), R.end(), thrust::constant_iterator<ElemT>(volp), R.begin(), thrust::multiplies<ElemT>());
                     thrust::transform(policy, R.begin(), R.end(), R.begin(), AX_kernel<ElemT>(volp));
                 }
-#ifdef SBD_USE_THRUST_NOSYNC
-                cudaStreamSynchronize(stream);
-#endif
+                Space::sync();
             }
             // #endif
 
@@ -322,7 +333,7 @@ void Davidson(const thrust::device_vector<ElemT> &hii,
                 auto ci = thrust::counting_iterator<size_t>(0);
                 {
                     SBD_NVTX_RANGE_COLOR("thrust::for_each_n", __LINE__);
-                    thrust::for_each_n(policy, ci, W.size(), Determine_kernel(C[ib + 1], R, dii, eps_reg, E[0]));
+                    thrust::for_each_n(policy, ci, W.size(), Determine_kernel<ElemT, RealT>(raw_ptr(C[ib + 1]), raw_ptr(R), raw_ptr(dii), eps_reg, E[0]));
                 }
 
                 // Gram-Schmidt orthogonalization
@@ -335,9 +346,7 @@ void Davidson(const thrust::device_vector<ElemT> &hii,
                         thrust::transform(policy, C[kb].begin(), C[kb].end(), C[ib + 1].begin(), C[ib + 1].begin(), AXPY_kernel<ElemT>(olap));
                     }
                 }
-#ifdef SBD_USE_THRUST_NOSYNC
-                cudaStreamSynchronize(stream);
-#endif
+                Space::sync();
 
                 RealT norm_C;
                 Normalize(C[ib + 1], norm_C, mult.b_comm(), mpi_size_b);
@@ -385,10 +394,11 @@ void Davidson(const thrust::device_vector<ElemT> &hii,
     free(E);
 }
 
-#else  // #ifndef SBD_USE_CUBLAS
+#ifdef SBD_USE_CUBLAS
 
+// GPU-subspace Davidson with batched cuBLAS GEMV.
 template <typename ElemT, typename RealT>
-void Davidson(const thrust::device_vector<ElemT> &hii,
+void DavidsonCublas(const thrust::device_vector<ElemT> &hii,
                 std::vector<ElemT> &W,
                 MultBase<ElemT>& mult,
                 int max_iteration,
@@ -675,223 +685,28 @@ void Davidson(const thrust::device_vector<ElemT> &hii,
     SBD_CHECK_CUDA(cudaFree(HC));
 }
 
-#endif // #ifndef SBD_USE_CUBLAS
+#endif // #ifdef SBD_USE_CUBLAS
 
-// Davidson with CPU-resident trial/sigma vectors (LPDDR5X).
-// Fixed HBM cost: 2 staging buffers regardless of subspace depth.
-// Primary purpose: avoid OOM when num_block*n_vec_bytes exceeds HBM.
-// Enable at runtime with --cpu_subspace 1.
+// cpu_subspace: keep the subspace vectors in host memory (HostSubspace) instead of GPU memory.
 template <typename ElemT, typename RealT>
-void DavidsonCPUSubspace(const thrust::device_vector<ElemT> &hii,
-                          std::vector<ElemT> &W,
-                          MultBase<ElemT>& mult,
-                          int max_iteration,
-                          int num_block,
-                          RealT eps,
-                          RealT max_time)
+void Davidson(const thrust::device_vector<ElemT> &hii,
+                std::vector<ElemT> &W,
+                MultBase<ElemT>& mult,
+                int max_iteration,
+                int num_block,
+                RealT eps,
+                RealT max_time,
+                bool cpu_subspace = false)
 {
-    SBD_NVTX_RANGE_COLOR("DavidsonCPUSubspace", __LINE__);
-    RealT eps_reg = 1.0e-12;
-    size_t n = W.size();
-
-    std::vector<std::vector<ElemT>> C(num_block, std::vector<ElemT>(n, ElemT(0)));
-    std::vector<std::vector<ElemT>> HC(num_block, std::vector<ElemT>(n, ElemT(0)));
-    thrust::device_vector<ElemT> C_dev(n);
-    thrust::device_vector<ElemT> HC_dev(n);
-
-    std::vector<ElemT> W_cpu(W);
-    std::vector<ElemT> R_cpu(n, ElemT(0));
-
-    // CPU diagonal for Determine preconditioner (equivalent of GetTotalD_Thrust)
-    std::vector<ElemT> hii_cpu(n);
-    thrust::copy(hii.begin(), hii.end(), hii_cpu.begin());
-    std::vector<ElemT> dii_cpu(n);
-    {
-        int h_size; MPI_Comm_size(mult.h_comm(), &h_size);
-        if (h_size == 1) {
-            dii_cpu = hii_cpu;
-        } else {
-            MPI_Datatype DataT = GetMpiType<ElemT>::MpiT;
-            MPI_Allreduce(hii_cpu.data(), dii_cpu.data(), (int)n, DataT, MPI_SUM, mult.h_comm());
-        }
+    if (cpu_subspace) {
+        DavidsonImpl<HostSubspace>(hii, W, mult, max_iteration, num_block, eps, max_time);
+    } else {
+#ifdef SBD_USE_CUBLAS
+        DavidsonCublas(hii, W, mult, max_iteration, num_block, eps, max_time);
+#else
+        DavidsonImpl<DeviceSubspace>(hii, W, mult, max_iteration, num_block, eps, max_time);
+#endif
     }
-
-    int mpi_rank_h; MPI_Comm_rank(mult.h_comm(), &mpi_rank_h);
-    int mpi_size_h; MPI_Comm_size(mult.h_comm(), &mpi_size_h);
-    int mpi_rank_b; MPI_Comm_rank(mult.b_comm(), &mpi_rank_b);
-    int mpi_size_b; MPI_Comm_size(mult.b_comm(), &mpi_size_b);
-    int mpi_rank_t; MPI_Comm_rank(mult.t_comm(), &mpi_rank_t);
-    int mpi_size_t; MPI_Comm_size(mult.t_comm(), &mpi_size_t);
-
-    ElemT *H = (ElemT *)calloc(num_block * num_block, sizeof(ElemT));
-    ElemT *U = (ElemT *)calloc(num_block * num_block, sizeof(ElemT));
-    RealT *E = (RealT *)malloc(num_block * sizeof(RealT));
-    char jobz = 'V';
-    char uplo = 'U';
-    int nb = num_block;
-    MPI_Datatype DataH = GetMpiType<ElemT>::MpiT;
-
-    bool do_continue = true;
-    std::vector<double> onestep_times(num_block * max_iteration, 0.0);
-    auto start_time = std::chrono::high_resolution_clock::now();
-
-    for (int it = 0; it < max_iteration; it++) {
-        std::copy(W_cpu.begin(), W_cpu.end(), C[0].begin());
-
-        for (int ib = 0; ib < nb; ib++) {
-            auto step_start = std::chrono::high_resolution_clock::now();
-
-            // Stage trial vector to HBM, run mult, copy sigma back to LPDDR5X
-            thrust::copy(C[ib].begin(), C[ib].end(), C_dev.begin());
-            thrust::fill(HC_dev.begin(), HC_dev.end(), ElemT(0));
-            mult.run(hii, C_dev, HC_dev);
-            thrust::copy(HC_dev.begin(), HC_dev.end(), HC[ib].begin());
-
-            // Projected Hamiltonian elements — CPU InnerProduct from dm_vector.h
-            for (int jb = 0; jb <= ib; jb++) {
-                InnerProduct(C[jb], HC[ib], H[jb + nb * ib], mult.b_comm());
-                H[ib + nb * jb] = Conjugate(H[jb + nb * ib]);
-            }
-            for (int jb = 0; jb <= ib; jb++)
-                for (int kb = 0; kb <= ib; kb++)
-                    U[jb + nb * kb] = H[jb + nb * kb];
-
-#ifdef SBD_NO_LAPACK
-            hp_numeric::JacobiHeev(ib + 1, U, nb, E);
-#else
-            hp_numeric::MatHeev(jobz, uplo, ib + 1, U, nb, E);
-#endif
-
-            // Ritz vector W_cpu = sum_kb U[kb] * C[kb]
-            {
-                ElemT a0 = U[0];
-                #pragma omp parallel for schedule(static)
-                for (size_t is = 0; is < n; is++) W_cpu[is] = a0 * C[0][is];
-            }
-            for (int kb = 1; kb <= ib; kb++) {
-                ElemT ak = U[kb];
-                #pragma omp parallel for schedule(static)
-                for (size_t is = 0; is < n; is++) W_cpu[is] += ak * C[kb][is];
-            }
-
-            // Residual R_cpu = E[0]*W_cpu - sum_kb U[kb]*HC[kb]
-            {
-                ElemT a0 = ElemT(-1.0) * U[0];
-                #pragma omp parallel for schedule(static)
-                for (size_t is = 0; is < n; is++) R_cpu[is] = a0 * HC[0][is];
-            }
-            for (int kb = 1; kb <= ib; kb++) {
-                ElemT ak = ElemT(-1.0) * U[kb];
-                #pragma omp parallel for schedule(static)
-                for (size_t is = 0; is < n; is++) R_cpu[is] += ak * HC[kb][is];
-            }
-            {
-                ElemT e0 = ElemT(E[0]);
-                #pragma omp parallel for schedule(static)
-                for (size_t is = 0; is < n; is++) R_cpu[is] += e0 * W_cpu[is];
-            }
-
-            // Stability patch (mirrors GPU Davidson Fugaku patch)
-            if (mpi_size_t > 1) {
-                MPI_Allreduce(MPI_IN_PLACE, W_cpu.data(), (int)n, DataH, MPI_SUM, mult.t_comm());
-                MPI_Allreduce(MPI_IN_PLACE, R_cpu.data(), (int)n, DataH, MPI_SUM, mult.t_comm());
-            }
-            if (mpi_size_h > 1) {
-                MPI_Allreduce(MPI_IN_PLACE, W_cpu.data(), (int)n, DataH, MPI_SUM, mult.h_comm());
-                MPI_Allreduce(MPI_IN_PLACE, R_cpu.data(), (int)n, DataH, MPI_SUM, mult.h_comm());
-            }
-            if (mpi_size_h * mpi_size_t > 1) {
-                ElemT volp(1.0 / (mpi_size_h * mpi_size_t));
-                #pragma omp parallel for schedule(static)
-                for (size_t is = 0; is < n; is++) { W_cpu[is] *= volp; R_cpu[is] *= volp; }
-            }
-
-            // Normalize — CPU version from dm_vector.h (std::vector overload)
-            RealT norm_W, norm_R;
-            Normalize(W_cpu, norm_W, mult.b_comm());
-            Normalize(R_cpu, norm_R, mult.b_comm());
-
-#ifdef SBD_DEBUG_DAVIDSON
-            std::cout << " DavidsonCPU iteration " << it << "." << ib
-                        << " at mpi (h,b,t) = ("
-                        << mpi_rank_h << "," << mpi_rank_b << ","
-                        << mpi_rank_t << "): (tol=" << norm_R << "):";
-            for (int p = 0; p < std::min(ib + 1, 4); p++)
-                std::cout << " " << E[p];
-            std::cout << std::endl;
-#else
-            if (mpi_rank_h == 0 && mpi_rank_t == 0 && mpi_rank_b == 0) {
-                std::cout << " Davidson iteration " << it << "." << ib
-                            << " (tol=" << norm_R << "):";
-                for (int p = 0; p < std::min(ib + 1, 4); p++)
-                    std::cout << " " << E[p];
-                std::cout << std::endl;
-            }
-#endif
-
-            if (norm_R < eps) {
-                do_continue = false;
-                break;
-            }
-
-            if (ib < nb - 1) {
-                // Determine: preconditioned correction vector
-                ElemT e0 = ElemT(E[0]);
-                #pragma omp parallel for schedule(static)
-                for (size_t is = 0; is < n; is++) {
-                    auto denom = e0 - dii_cpu[is];
-                    if (SquaredNorm(denom) > eps_reg * eps_reg)
-                        C[ib + 1][is] = R_cpu[is] / denom;
-                    else
-                        C[ib + 1][is] = R_cpu[is] / (denom - ElemT(eps_reg));
-                }
-
-                // Gram-Schmidt orthogonalization
-                for (int kb = 0; kb < ib + 1; kb++) {
-                    ElemT olap;
-                    InnerProduct(C[kb], C[ib + 1], olap, mult.b_comm());
-                    olap *= ElemT(-1.0);
-                    #pragma omp parallel for schedule(static)
-                    for (size_t is = 0; is < n; is++) C[ib + 1][is] += olap * C[kb][is];
-                }
-
-                RealT norm_C;
-                Normalize(C[ib + 1], norm_C, mult.b_comm());
-            }
-
-            auto step_end = std::chrono::high_resolution_clock::now();
-            onestep_times[it * nb + ib] = std::chrono::duration<double>(step_end - step_start).count();
-            double ave_time_per_step = 0.0;
-            for (int ks = 0; ks <= it * nb + ib; ks++)
-                ave_time_per_step += onestep_times[ks];
-            ave_time_per_step /= (it * nb + ib + 1);
-
-            auto current_time = std::chrono::high_resolution_clock::now();
-            double total_elapsed = std::chrono::duration<double>(current_time - start_time).count();
-            double predicted_next_end = total_elapsed + ave_time_per_step;
-            if (mpi_rank_h == 0) {
-                if (mpi_rank_t == 0)
-                    MPI_Bcast(&predicted_next_end, 1, MPI_DOUBLE, 0, mult.b_comm());
-                MPI_Bcast(&predicted_next_end, 1, MPI_DOUBLE, 0, mult.t_comm());
-            }
-            MPI_Bcast(&predicted_next_end, 1, MPI_DOUBLE, 0, mult.h_comm());
-
-            if (predicted_next_end > max_time) {
-                do_continue = false;
-                break;
-            }
-
-        } // end for(int ib ...)
-
-        if (!do_continue) break;
-
-    } // end for(int it ...)
-
-    std::copy(W_cpu.begin(), W_cpu.end(), W.begin());
-
-    free(H);
-    free(U);
-    free(E);
 }
 
 }
