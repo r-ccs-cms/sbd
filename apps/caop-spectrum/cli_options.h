@@ -29,7 +29,7 @@ inline double real(const std::string& s) {
   std::size_t pos=0;double x=std::stod(s,&pos);if(pos!=s.size()||!std::isfinite(x)) throw std::invalid_argument("expected finite number");return x;
 }
 inline void usage() {
-  std::cout<<"CAOP matrix spectrum (CPU reference)\n"
+  std::cout<<"CAOP matrix spectrum\n"
     "Generate: --hamfile H --loadname PREFIX --wavefunction-shards N --sites N\n"
     "  --orbitals 0,1,... --channel addition|removal --reference-energy E\n"
     "  Or: --applied-operator-type general --operator-file FILE (repeatable), without orbitals/channel\n"
@@ -121,6 +121,12 @@ inline void print_options(std::ostream& out,const Options& o,int mpi_size,bool c
     out<<"# h size: "<<o.h_size<<"\n# t size: "<<o.t_size<<'\n';
     if(o.h_size<=std::size_t(mpi_size) && o.t_size<=std::size_t(mpi_size)/o.h_size)
       out<<"# b size: "<<mpi_size/o.h_size/o.t_size<<'\n';
+#ifdef SBD_THRUST
+    out<<"# Hamiltonian application backend: "
+       <<(o.hamiltonian_mode=="on-the-fly"?"Thrust GPU":"CPU")<<'\n';
+#else
+    out<<"# Hamiltonian application backend: CPU\n";
+#endif
     out<<"# Hamiltonian: "<<o.ham<<"\n# Hamiltonian mode: "<<o.hamiltonian_mode
        <<"\n# load name: "<<o.load<<"\n# wavefunction shards: "<<o.shards
        <<"\n# wavefunction type: "<<o.wavefunction_type<<"\n# sites: "<<o.sites
