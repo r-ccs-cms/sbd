@@ -219,7 +219,8 @@ namespace sbd {
       int N;
       int method = sbd_data.method;
 #ifdef SBD_THRUST
-	  method &= 1;
+	  // this line should be removed when method 1 and 3 will be implemented
+	  method = method & 2;
 #endif
       int max_it = sbd_data.max_it;
       int max_nb = sbd_data.max_nb;
