@@ -3,6 +3,9 @@
 #include <chrono>
 #include <random>
 #include <deque>
+#include <cstdlib>
+#include <cerrno>
+#include <climits>
 
 #include <unistd.h>
 
@@ -15,6 +18,45 @@
 #include "sbd/framework/nvtx.h"
 
 int main(int argc, char * argv[]) {
+
+#if defined(SBD_THRUST) && defined(__CUDACC__)
+  // MPI may initialize CUDA resources on the current device. Select the
+  // node-local device and establish its context before initializing MPI.
+  int numDevices = 0;
+  cudaError_t cuda_status = cudaGetDeviceCount(&numDevices);
+  if (cuda_status != cudaSuccess || numDevices < 1) {
+    std::cerr << "CUDA startup: no usable device ("
+              << cudaGetErrorString(cuda_status) << ")\n";
+    return EXIT_FAILURE;
+  }
+
+  const char * local_rank_env = std::getenv("OMPI_COMM_WORLD_LOCAL_RANK");
+  if (local_rank_env == nullptr) local_rank_env = std::getenv("SLURM_LOCALID");
+  long local_rank = 0;
+  if (local_rank_env != nullptr) {
+    char * end = nullptr;
+    errno = 0;
+    local_rank = std::strtol(local_rank_env, &end, 10);
+    if (errno != 0 || end == local_rank_env || *end != '\0' ||
+        local_rank < 0 || local_rank > INT_MAX) {
+      std::cerr << "CUDA startup: invalid launcher local rank: "
+                << local_rank_env << '\n';
+      return EXIT_FAILURE;
+    }
+  } else if (numDevices != 1) {
+    std::cerr << "CUDA startup: multiple visible devices require "
+              << "OMPI_COMM_WORLD_LOCAL_RANK or SLURM_LOCALID\n";
+    return EXIT_FAILURE;
+  }
+
+  cuda_status = cudaSetDevice(static_cast<int>(local_rank % numDevices));
+  if (cuda_status == cudaSuccess) cuda_status = cudaFree(nullptr);
+  if (cuda_status != cudaSuccess) {
+    std::cerr << "CUDA startup: device/context initialization failed: "
+              << cudaGetErrorString(cuda_status) << '\n';
+    return EXIT_FAILURE;
+  }
+#endif
 
   int provided;
   int mpi_ierr = MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
@@ -33,17 +75,11 @@ int main(int argc, char * argv[]) {
   omp_set_default_device(myDevice);
 #endif
 
-#ifdef SBD_THRUST
+#if defined(SBD_THRUST) && !defined(__CUDACC__)
   int numDevices, myDevice;
-#ifdef __CUDACC__
-  cudaGetDeviceCount(&numDevices);
-  myDevice = mpi_rank % numDevices;
-  cudaSetDevice(myDevice);
-#else
   hipGetDeviceCount(&numDevices);
   myDevice = mpi_rank % numDevices;
   hipSetDevice(myDevice);
-#endif
 #endif
 
   auto sbd_data = sbd::tpb::generate_sbd_data(argc,argv);
