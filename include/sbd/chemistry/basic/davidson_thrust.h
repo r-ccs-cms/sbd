@@ -622,7 +622,7 @@ void DavidsonCublas(const thrust::device_vector<ElemT> &hii,
                     SBD_NVTX_RANGE_COLOR("thrust::for_each_n", __LINE__);
                     auto ci = thrust::counting_iterator<size_t>(0);
                     thrust::for_each_n(policy_nosync, ci, W.size(),
-                                       Determine_kernel(C_tmp, R, dii, eps_reg, E[0]));
+                                       Determine_kernel<ElemT, RealT>(raw_ptr(C_tmp), raw_ptr(R), raw_ptr(dii), eps_reg, E[0]));
                 }
 
                 // Gram-Schmidt orthogonalization
