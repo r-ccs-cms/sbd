@@ -59,6 +59,10 @@ namespace sbd {
     }
 
     res.resize(2*oIdx.size(),ElemT(0.0));
+    const int result_threads=omp_get_max_threads();
+    std::vector<std::vector<ElemT>> thread_results(
+        result_threads,std::vector<ElemT>(2*oIdx.size(),ElemT(0.0)));
+
     
 #pragma omp parallel
     {
@@ -70,7 +74,7 @@ namespace sbd {
       if( thread_id == num_threads - 1 ) {
 	ja_end = ia_end;
       }
-      std::vector<ElemT> local_res(2*oIdx.size(),ElemT(0.0));
+      std::vector<ElemT>& local_res=thread_results[thread_id];
       
       for(size_t ia = ja_start; ia < ja_end; ia++) {
 	for(size_t ib = ib_start; ib < ib_end; ib++) {
