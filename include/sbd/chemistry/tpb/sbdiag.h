@@ -191,9 +191,6 @@ namespace sbd {
       int N;
 
       int method = sbd_data.method;
-#ifdef SBD_THRUST
-	  method = method & 1;
-#endif
 	  int max_it = sbd_data.max_it;
       int max_nb = sbd_data.max_nb;
       double eps = sbd_data.eps;
@@ -544,20 +541,21 @@ namespace sbd {
 
 	/**
 	   Method 1: Calculation with storing hamiltonian elements
-	   (SBD_THRUST uses matrix-free GPU path; stored-ham arrays are CPU-only)
 	*/
 	auto time_start_diag = std::chrono::high_resolution_clock::now();
 	auto time_start_mkham = std::chrono::high_resolution_clock::now();
 
 #ifdef SBD_THRUST
+	MultTPBThrustPreHamiltonian<double> device_mult_pre;
 	auto time_start_mult_init = std::chrono::high_resolution_clock::now();
-	device_mult.Init(adet, bdet, bit_length, static_cast<size_t>(L),
+	device_mult_pre.Init(adet, bdet, bit_length, static_cast<size_t>(L),
                          adet_comm_size,bdet_comm_size, helper, I0, I1, I2,
-                         h_comm, b_comm, t_comm, a_comm,
 #ifdef SBD_USE_NCCL
-                         h_nccl_comm, b_nccl_comm, t_nccl_comm, a_nccl_comm,
+                         h_comm, b_comm, t_comm, a_comm,
+                         h_nccl_comm, b_nccl_comm, t_nccl_comm, a_nccl_comm);
+#else
+                         h_comm, b_comm, t_comm, a_comm);
 #endif
-                         sbd_data.use_precalculated_dets, sbd_data.max_memory_gb_for_determinants, sbd_data.thrust_collapse_loops);
 	auto time_end_mult_init = std::chrono::high_resolution_clock::now();
 	auto elapsed_mult_init_count = std::chrono::duration_cast<std::chrono::microseconds>(time_end_mult_init-time_start_mult_init).count();
 	double elapsed_mult_init = 1.0e-6 * elapsed_mult_init_count;
@@ -566,7 +564,7 @@ namespace sbd {
 	}
 
 	thrust::device_vector<double> hii;
-	device_mult.makeQChamDiagTerms(hii);
+	device_mult_pre.makeQChamDiagTerms(hii);
 #else
 	std::vector<double> hii;
 	std::vector<std::vector<size_t*>> ih;
@@ -595,11 +593,11 @@ namespace sbd {
 	// W was initialized or loaded before Hamiltonian construction.
 #ifdef SBD_THRUST
 	if( method == 1 ) {
-		sbd::Davidson(hii, W, device_mult,
-				max_it,max_nb,eps,max_time,sbd_data.cpu_subspace);
+		sbd::Davidson(hii, W, device_mult_pre,
+				max_it,max_nb,eps,max_time);
 	} else {
-		sbd::Lanczos(hii, W, device_mult,
-				max_it,max_nb,eps,sbd_data.cpu_subspace);
+		sbd::Lanczos(hii, W, device_mult_pre,
+				max_it,max_nb,eps);
 	}
 #else
 	if( method == 1 ) {
@@ -643,7 +641,7 @@ namespace sbd {
 
 	thrust::device_vector<double> C_dev(C.size(), 0.0);
 
-	device_mult.run(hii, W_dev, C_dev);
+	device_mult_pre.run(hii, W_dev, C_dev);
 
 	thrust::copy_n(C_dev.begin(), C_dev.size(), C.begin());
 #else
@@ -722,12 +720,24 @@ namespace sbd {
 
 	auto time_start_meas = std::chrono::high_resolution_clock::now();
 #ifdef SBD_THRUST
-        {
-            SBD_NVTX_RANGE_COLOR("device_mult.correlation", __LINE__);
-            device_mult.correlation(W,
-                                    one_p_rdm,
-                                    two_p_rdm);
-        }
+	if ( method == 1 || method == 3 ) {
+		// for device 1 and 3, does not have CrAn storage
+		// so init them here for correlation
+		// this is temporary implementaiton
+		device_mult.Init(adet, bdet, bit_length, static_cast<size_t>(L),
+							adet_comm_size,bdet_comm_size, helper, I0, I1, I2,
+							h_comm,b_comm,t_comm,a_comm,
+#ifdef SBD_USE_NCCL
+							h_nccl_comm, b_nccl_comm, t_nccl_comm, a_nccl_comm,
+#endif
+							false, sbd_data.max_memory_gb_for_determinants, false);
+	}
+	{
+		SBD_NVTX_RANGE_COLOR("device_mult.correlation", __LINE__);
+		device_mult.correlation(W,
+								one_p_rdm,
+								two_p_rdm);
+	}
 #else
 	Correlation(W,adet,bdet,bit_length,L,
 		    adet_comm_size,bdet_comm_size,

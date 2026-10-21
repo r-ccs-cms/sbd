@@ -14,10 +14,18 @@
 #include <nccl.h>
 #endif
 
+#include <cuda.h>
+
+
+#include "sbd/framework/cuda_utility.h"
 #include "sbd/framework/nvtx.h"
 
 // per thread DetI, DetJ storage size (1GB max)
 #define MAX_DET_SIZE 134217728
+
+// Maximum dynamic shared memory a kernel may request per block without opting
+// in via cudaFuncSetAttribute(cudaFuncAttributeMaxDynamicSharedMemorySize).
+#define SBD_MAX_DYNAMIC_SHARED_BYTES 49152
 
 // TPB GPU kernel tuning (mirrors GDB's SBD_MULT_BLOCK_SIZE / SBD_MULT_MIN_BLOCKS_PER_SM).
 // SBD_TPB_BLOCK_SIZE: threads per block for tpb_for_each_n_kernel.
@@ -210,6 +218,8 @@ public:
                      std::vector<std::vector<ElemT>> & twobody_out);
 };
 
+
+
 // contructor for Mult data
 template <typename ElemT>
 void MultTPBThrust<ElemT>::Init(
@@ -396,8 +406,10 @@ protected:
     ElemT* T;
     size_t adets_size;
     size_t bdets_size;
-    size_t mpi_rank_h;
-    size_t mpi_size_h;
+    // Default to the single-rank case so that kernels which are instantiated
+    // without an explicit set_mpi_size() never divide by zero.
+    size_t mpi_rank_h = 0;
+    size_t mpi_size_h = 1;
     size_t* adets;
     size_t* bdets;
     size_t* det_I;
@@ -438,6 +450,88 @@ public:
     {
         mpi_rank_h = h_rank;
         mpi_size_h = h_size;
+    }
+
+    // reduce ElemT all threads in a block
+    template <typename T>
+    __device__ T reduce_sum_threads_in_block(T local_val)
+    {
+        __shared__ T shared_sum[32];
+        int tid = threadIdx.x;
+        int nid = blockDim.x;
+        int wid = threadIdx.x & 31;
+
+        if (sizeof(T) < 16) { // single element
+            T sum = local_val;
+            sum += __shfl_down_sync(0xffffffff, sum, 1);
+            sum += __shfl_down_sync(0xffffffff, sum, 2);
+            sum += __shfl_down_sync(0xffffffff, sum, 4);
+            sum += __shfl_down_sync(0xffffffff, sum, 8);
+            sum += __shfl_down_sync(0xffffffff, sum, 16);
+
+            if (nid > 32) {
+                if (wid == 0) {
+                    shared_sum[tid / 32] = sum;
+                }
+                __syncthreads();
+                if (wid < nid / 32)
+                    sum = shared_sum[wid];
+                else
+                    sum = 0;
+                sum += __shfl_down_sync(0xffffffff, sum, 1);
+                sum += __shfl_down_sync(0xffffffff, sum, 2);
+                sum += __shfl_down_sync(0xffffffff, sum, 4);
+                sum += __shfl_down_sync(0xffffffff, sum, 8);
+                sum += __shfl_down_sync(0xffffffff, sum, 16);
+            }
+            return sum;
+        } else {    // double complex
+            double sum_r = ((double*)&local_val)[0];
+            double sum_i = ((double*)&local_val)[1];
+            sum_r += __shfl_down_sync(0xffffffff, sum_r, 1);
+            sum_r += __shfl_down_sync(0xffffffff, sum_r, 2);
+            sum_r += __shfl_down_sync(0xffffffff, sum_r, 4);
+            sum_r += __shfl_down_sync(0xffffffff, sum_r, 8);
+            sum_r += __shfl_down_sync(0xffffffff, sum_r, 16);
+
+            sum_i += __shfl_down_sync(0xffffffff, sum_i, 1);
+            sum_i += __shfl_down_sync(0xffffffff, sum_i, 2);
+            sum_i += __shfl_down_sync(0xffffffff, sum_i, 4);
+            sum_i += __shfl_down_sync(0xffffffff, sum_i, 8);
+            sum_i += __shfl_down_sync(0xffffffff, sum_i, 16);
+
+            if (nid > 32) {
+                if (wid == 0) {
+                    ((double*)shared_sum)[(tid / 32) * 2] = sum_r;
+                    ((double*)shared_sum)[(tid / 32) * 2 + 1] = sum_i;
+                }
+                __syncthreads();
+                if (wid < nid / 32) {
+                    sum_r = ((double*)shared_sum)[wid * 2];
+                    sum_i = ((double*)shared_sum)[wid * 2 + 1];
+                }
+                else {
+                    sum_r = 0.0;
+                    sum_i = 0.0;
+                }
+
+                sum_r += __shfl_down_sync(0xffffffff, sum_r, 1);
+                sum_r += __shfl_down_sync(0xffffffff, sum_r, 2);
+                sum_r += __shfl_down_sync(0xffffffff, sum_r, 4);
+                sum_r += __shfl_down_sync(0xffffffff, sum_r, 8);
+                sum_r += __shfl_down_sync(0xffffffff, sum_r, 16);
+
+                sum_i += __shfl_down_sync(0xffffffff, sum_i, 1);
+                sum_i += __shfl_down_sync(0xffffffff, sum_i, 2);
+                sum_i += __shfl_down_sync(0xffffffff, sum_i, 4);
+                sum_i += __shfl_down_sync(0xffffffff, sum_i, 8);
+                sum_i += __shfl_down_sync(0xffffffff, sum_i, 16);
+            }
+            T ret;
+            ((double*)&ret)[0] = sum_r;
+            ((double*)&ret)[1] = sum_i;
+            return ret;
+        }
     }
 };
 
@@ -536,7 +630,7 @@ public:
                            + jb - helper.ketBetaStart;
             eij *= this->T[ketIdx];
         }
-    }        
+    }
 
     // kernel entry point
     __device__ __host__ void operator()(size_t i)
@@ -602,7 +696,7 @@ public:
                            + jb - helper.ketBetaStart;
             eij *= this->T[ketIdx];
         }
-    }        
+    }
 
     // kernel entry point
     __device__ __host__ void operator()(size_t i0)
@@ -930,7 +1024,7 @@ public:
             eij *= this->T[ketIdx];
         }
     }
-    
+
     // kernel entry point
     __device__ void operator()(size_t i)
     {
@@ -960,7 +1054,7 @@ public:
     {
         helper = h;
     }
-    
+
     // NOTE: loop_body is intentionally duplicated in both MultUnified and
     // MultUnified_Vec. While it would be cleaner to share the implementation
     // via inheritance, doing so resulted in noticeable performance degradation,
@@ -1057,7 +1151,7 @@ public:
             eij *= this->T[ketIdx];
         }
     }
-    
+
     // kernel entry point
     __device__ void operator()(size_t i0)
     {
@@ -1327,7 +1421,6 @@ void MultTPBThrust<ElemT>::run(
     size_t bdet_max = bdets.size();
     get_mpi_range(adet_comm_size,0,adet_min,adet_max);
     get_mpi_range(bdet_comm_size,0,bdet_min,bdet_max);
-    size_t max_det_size = (adet_max-adet_min)*(bdet_max-bdet_min);
 
     auto& T = slide_buf;
     int active_T = 0;
@@ -1658,6 +1751,7 @@ void MultTPBThrust<ElemT>::run(
 } // end function
 
 
+
 template <typename ElemT>
 class MakeQChamDiagTermKernel : public MultKernelBase<ElemT>
 {
@@ -1688,7 +1782,7 @@ public:
                 size_t b = braIdx - a * braBetaSize;
                 size_t ia = a + helper.braAlphaStart;
                 size_t ib = b + helper.braBetaStart;
-                this->DetFromAlphaBeta(Det, this->adets + ia * this->D_size, this->bdets + ib * this->D_size);
+                this->DetFromAlphaBeta(Det, this->adets + ia * this->D_half_size, this->bdets + ib * this->D_half_size);
             }
             hii[braIdx] = this->ZeroExcite(Det);
         }
@@ -1737,6 +1831,772 @@ void MultTPBThrust<ElemT>::makeQChamDiagTerms(thrust::device_vector<ElemT> &hii)
             offset += num_threads;
         }
     }
+}
+
+// =======================================================
+// classes for pre-calculated Hamiltonian
+// =======================================================
+template <typename ElemT>
+class MultTPBThrustPreHamiltonian : public MultTPBThrust<ElemT> {
+protected:
+    std::vector<thrust::device_vector<ElemT>> hij_storage;
+    std::vector<thrust::device_vector<size_t>> hij_offset;
+    size_t num_gpu_threads;
+    size_t num_gpu_blocks;
+    std::vector<size_t> num_mult_threads;
+public:
+    MultTPBThrustPreHamiltonian() {}
+
+    virtual void Init(
+        const det_vector<size_t, det_kind::half> &adets_in,
+        const det_vector<size_t, det_kind::half> &bdets_in,
+        const uint32_t bit_length_in,
+        const size_t norbs_in,
+        const size_t adet_comm_size_in,
+        const size_t bdet_comm_size_in,
+        const std::vector<TaskHelpers> &helper_in,
+        const ElemT &I0_in,
+        const oneInt<ElemT> &I1_in,
+        const twoInt<ElemT> &I2_in,
+        MPI_Comm h_comm_in,
+        MPI_Comm b_comm_in,
+        MPI_Comm t_comm_in,
+#ifdef SBD_USE_NCCL
+        MPI_Comm a_comm_in,
+        ncclComm_t h_nccl_comm,
+        ncclComm_t b_nccl_comm,
+        ncclComm_t t_nccl_comm,
+        ncclComm_t a_nccl_comm
+#else
+        MPI_Comm a_comm_in
+#endif
+    );
+    // Release the data that is only needed while the Hamiltonian is being
+    // pre-calculated. Only valid once Init() and makeQChamDiagTerms() are done,
+    // and it makes the inherited correlation() unusable (it re-derives the
+    // determinants from adets/bdets and needs the integral tables).
+    void free_unused_storage(void)
+    {
+        this->adets.clear();
+        this->adets.shrink_to_fit();
+        this->bdets.clear();
+        this->bdets.shrink_to_fit();
+        this->dets.clear();
+        this->dets.shrink_to_fit();
+    }
+
+    void precalculateHamiltonian(size_t task);
+
+    void run(const thrust::device_vector<ElemT> &hii,
+                    const thrust::device_vector<ElemT> &Wk,
+                    thrust::device_vector<ElemT> &Wb) override;
+
+    void makeQChamDiagTerms(thrust::device_vector<ElemT> &hii);
+};
+
+// contructor for Mult data for pre-calculated Hamiltonian (method = 0, 2)
+template <typename ElemT>
+void MultTPBThrustPreHamiltonian<ElemT>::Init(
+    const det_vector<size_t, det_kind::half> &adets_in,
+    const det_vector<size_t, det_kind::half> &bdets_in,
+    const uint32_t bit_length_in,
+    const size_t norbs_in,
+    const size_t adet_comm_size_in,
+    const size_t bdet_comm_size_in,
+    const std::vector<TaskHelpers> &helper_in,
+    const ElemT &I0_in,
+    const oneInt<ElemT> &I1_in,
+    const twoInt<ElemT> &I2_in,
+    MPI_Comm h_comm_in,
+    MPI_Comm b_comm_in,
+    MPI_Comm t_comm_in,
+#ifdef SBD_USE_NCCL
+    MPI_Comm a_comm_in,
+    ncclComm_t h_nccl_comm,
+    ncclComm_t b_nccl_comm,
+    ncclComm_t t_nccl_comm,
+    ncclComm_t a_nccl_comm
+#else
+    MPI_Comm a_comm_in
+#endif
+    )
+{
+    SBD_NVTX_RANGE_COLOR("Init", __LINE__);
+
+#ifdef SBD_USE_RANK_DISTRIBUTION
+#ifdef SBD_USE_BLOCK_RANK_DISTRIBUTION
+    printf("[%s,%d] Block rank distribution enabled\n", __FILE__, __LINE__);
+#else
+    printf("[%s,%d] Cyclic (strided) rank distribution enabled\n", __FILE__, __LINE__);
+#endif
+#ifdef SBD_USE_VECTORIZATION
+    printf("[%s,%d] Vectorization enabled\n", __FILE__, __LINE__);
+#endif
+#endif
+
+#ifdef SBD_USE_32BIT_PARITY
+    printf("[%s,%d] 32-bit version of parity used (bit_length = %u)\n",
+           __FILE__, __LINE__, bit_length_in);
+    if (bit_length_in > 32) {
+        fprintf(stderr, "[ERROR] bit_length is too large for 32-bit version\n");
+        exit(-1);
+    }
+#endif
+
+    this->bit_length_ = bit_length_in;
+    this->norbs_ = norbs_in;
+    this->D_size_ = (2 * norbs_in + bit_length_in - 1) / bit_length_in;
+    this->D_half_size_ = (norbs_in + bit_length_in - 1) / bit_length_in;
+
+    this->h_comm_ = h_comm_in;
+    this->b_comm_ = b_comm_in;
+    this->t_comm_ = t_comm_in;
+    this->a_comm_ = a_comm_in;
+#ifdef SBD_USE_NCCL
+    this->h_nccl_comm_ = h_nccl_comm;
+    this->b_nccl_comm_ = b_nccl_comm;
+    this->t_nccl_comm_ = t_nccl_comm;
+    this->a_nccl_comm_ = a_nccl_comm;
+#endif
+
+    this->adet_comm_size = adet_comm_size_in;
+    this->bdet_comm_size = bdet_comm_size_in;
+
+    this->I0 = I0_in;
+    // copyin I1
+    this->I1_store.resize(I1_in.store.size());
+    thrust::copy_n(I1_in.store.begin(), I1_in.store.size(), this->I1_store.begin());
+    this->I1 = oneInt_Thrust<ElemT>(this->I1_store, I1_in.norbs);
+
+    // copyin I2
+    this->I2_store.resize(I2_in.store.size());
+    thrust::copy_n(I2_in.store.begin(), I2_in.store.size(), this->I2_store.begin());
+    this->I2_dm.resize(I2_in.DirectMat.size());
+    thrust::copy_n(I2_in.DirectMat.begin(), I2_in.DirectMat.size(), this->I2_dm.begin());
+    this->I2_em.resize(I2_in.ExchangeMat.size());
+    thrust::copy_n(I2_in.ExchangeMat.begin(), I2_in.ExchangeMat.size(), this->I2_em.begin());
+    this->I2 = twoInt_Thrust<ElemT>(this->I2_store, I2_in.norbs, this->I2_dm, this->I2_em, I2_in.zero, I2_in.maxEntry);
+
+    this->adets_size = 0;
+    this->bdets_size = 0;
+    this->bra_adets_begin = 0;
+    this->bra_adets_end = 0;
+    this->bra_bdets_begin = 0;
+    this->bra_bdets_end = 0;
+    this->ket_adets_begin = 0;
+    this->ket_adets_end = 0;
+    this->ket_bdets_begin = 0;
+    this->ket_bdets_end = 0;
+
+    // copyin adets, bdets: det_vector is flat-packed, one H2D per array.
+    this->adets.resize(this->D_half_size_ * adets_in.size());
+    thrust::copy_n(adets_in.cflat().data(), this->adets.size(), this->adets.begin());
+    this->bdets.resize(this->D_half_size_ * bdets_in.size());
+    thrust::copy_n(bdets_in.cflat().data(), this->bdets.size(), this->bdets.begin());
+
+    this->helper.clear();
+    this->helper_storage.resize(helper_in.size());
+
+    // we do not use CrAn after pre-calculation
+    //this->CrAn_storage.resize(helper_in.size());
+
+    // initialize hij storage
+    hij_storage.resize(helper_in.size());
+    hij_offset.resize(helper_in.size());
+
+    num_mult_threads.resize(helper_in.size());
+
+    // allocate determinants buffer
+    size_t size = 0;
+    for (size_t task = 0; task < helper_in.size(); task++) {
+        size_t braAlphaSize = helper_in[task].braAlphaEnd - helper_in[task].braAlphaStart;
+        size_t braBetaSize = helper_in[task].braBetaEnd - helper_in[task].braBetaStart;
+        this->adets_size = std::max(this->adets_size, braAlphaSize);
+        this->bdets_size = std::max(this->bdets_size, braBetaSize);
+        size = std::max(size, braAlphaSize * braBetaSize);
+    }
+
+    size_t free_mem, total_mem;
+    cudaMemGetInfo(&free_mem, &total_mem);
+
+    num_gpu_blocks = std::max((size + 3) / 4, (size_t)1);
+
+    this->dets_size = 0;
+    this->num_max_threads = 0;
+
+    this->use_precalculated_dets = false;
+    this->collapse_loop = false;
+    this->max_memory_gb_for_determinants = 0;
+
+    for (size_t task = 0; task < helper_in.size(); task++) {
+        thrust::device_vector<int> cran_tmp;
+        this->helper.push_back(TaskHelpersThrust<ElemT>(this->helper_storage[task], cran_tmp, helper_in[task], true));
+
+        precalculateHamiltonian(task);
+    }
+}
+
+template <typename ElemT>
+class CountHamiltonianKernel : public MultKernelBase<ElemT>
+{
+protected:
+    TaskHelpersThrust<ElemT> helper;
+public:
+    CountHamiltonianKernel(const TaskHelpersThrust<ElemT>& h,
+                const MultTPBThrustPreHamiltonian<ElemT>& data) : MultKernelBase<ElemT>(data)
+    {
+        helper = h;
+    }
+
+    __device__ __host__ void count_hamiltonian(size_t i)
+    {
+        size_t braIdx = i;
+        size_t braBetaSize = helper.braBetaEnd - helper.braBetaStart;
+        size_t a = braIdx / braBetaSize;
+        size_t b = braIdx - a * braBetaSize;
+
+        size_t count = 0;
+
+        if ((braIdx % this->mpi_size_h) == this->mpi_rank_h) {
+            if (helper.taskType == 2) {
+                count += helper.SinglesFromAlphaOffset[a + 1] - helper.SinglesFromAlphaOffset[a];
+                count += helper.DoublesFromAlphaOffset[a + 1] - helper.DoublesFromAlphaOffset[a];
+            } else if (helper.taskType == 1) {
+                count += helper.SinglesFromBetaOffset[b + 1] - helper.SinglesFromBetaOffset[b];
+                count += helper.DoublesFromBetaOffset[b + 1] - helper.DoublesFromBetaOffset[b];
+            } else {
+                count += (helper.SinglesFromAlphaOffset[a + 1] - helper.SinglesFromAlphaOffset[a]) *
+                         (helper.SinglesFromBetaOffset[b + 1] - helper.SinglesFromBetaOffset[b]);
+            }
+        }
+        helper.Hij_offset[i + 1] = count;
+        if (i == 0)
+            helper.Hij_offset[0] = 0;
+    }
+
+    // kernel entry point
+    __device__ __host__ void operator()(size_t i)
+    {
+        count_hamiltonian(i);
+    }
+};
+
+template <typename ElemT>
+class MakeHamiltonianKernel : public MultKernelBase<ElemT>
+{
+protected:
+    TaskHelpersThrust<ElemT> helper;
+public:
+    MakeHamiltonianKernel(const TaskHelpersThrust<ElemT>& h,
+                const MultTPBThrustPreHamiltonian<ElemT>& data) : MultKernelBase<ElemT>(data)
+    {
+        helper = h;
+    }
+
+    __device__ __host__ size_t size(void)
+    {
+        size_t braAlphaSize = helper.braAlphaEnd - helper.braAlphaStart;
+        size_t braBetaSize = helper.braBetaEnd - helper.braBetaStart;
+        size_t size = braAlphaSize * braBetaSize;
+        return size;
+    }
+
+    __device__ void make_hamiltonian(size_t* DetI, size_t i)
+    {
+        size_t braIdx = i;
+        size_t braBetaSize = helper.braBetaEnd - helper.braBetaStart;
+        size_t a = braIdx / braBetaSize;
+        size_t b = braIdx - a * braBetaSize;
+        size_t ia = a + helper.braAlphaStart;
+        size_t ib = b + helper.braBetaStart;
+        int tid = threadIdx.x;
+        int nid = blockDim.x;
+
+        if ((braIdx % this->mpi_size_h) != this->mpi_rank_h) return;
+
+        __syncthreads();
+        if (tid == 0)
+            this->DetFromAlphaBeta(DetI, this->adets + ia * this->D_half_size, this->bdets + ib * this->D_half_size);
+        __syncthreads();
+
+        size_t pos = helper.Hij_offset[i];
+
+        if (helper.taskType == 2) {
+            size_t idx_offset = tid;
+            size_t j;
+            pos -= helper.SinglesFromAlphaOffset[a];
+            for (j = helper.SinglesFromAlphaOffset[a] + idx_offset; j < helper.SinglesFromAlphaOffset[a + 1]; j += nid) {
+                helper.Hij[pos + j] = this->OneExcite(DetI, helper.SinglesAlphaCrAnSM[j], helper.SinglesAlphaCrAnSM[j + helper.size_single_alpha]);
+            }
+            idx_offset = j - helper.SinglesFromAlphaOffset[a + 1];
+            pos += helper.SinglesFromAlphaOffset[a + 1] - helper.DoublesFromAlphaOffset[a];
+            for (j = helper.DoublesFromAlphaOffset[a] + idx_offset; j < helper.DoublesFromAlphaOffset[a + 1]; j += nid) {
+                helper.Hij[pos + j] = this->TwoExcite(DetI,
+                                    helper.DoublesAlphaCrAnSM[j], helper.DoublesAlphaCrAnSM[j + helper.size_double_alpha],
+                                    helper.DoublesAlphaCrAnSM[j + 2 * helper.size_double_alpha], helper.DoublesAlphaCrAnSM[j + 3 * helper.size_double_alpha]);
+            }
+        } else if (helper.taskType == 1) {
+            size_t idx_offset = tid;
+            size_t k;
+            pos -= helper.SinglesFromBetaOffset[b];
+            for (k = helper.SinglesFromBetaOffset[b] + idx_offset; k < helper.SinglesFromBetaOffset[b + 1]; k += nid) {
+                helper.Hij[pos + k] = this->OneExcite(DetI, helper.SinglesBetaCrAnSM[k], helper.SinglesBetaCrAnSM[k + helper.size_single_beta]);
+            }
+            idx_offset = k - helper.SinglesFromBetaOffset[b + 1];
+            pos += helper.SinglesFromBetaOffset[b + 1] - helper.DoublesFromBetaOffset[b];
+            for (k = helper.DoublesFromBetaOffset[b] + idx_offset; k < helper.DoublesFromBetaOffset[b + 1]; k += nid) {
+                helper.Hij[pos + k] = this->TwoExcite(DetI,
+                                    helper.DoublesBetaCrAnSM[k], helper.DoublesBetaCrAnSM[k + helper.size_double_beta],
+                                    helper.DoublesBetaCrAnSM[k + 2 * helper.size_double_beta], helper.DoublesBetaCrAnSM[k + 3 * helper.size_double_beta]);
+            }
+        } else {
+            size_t idx_offset = tid;
+            for (size_t j = helper.SinglesFromAlphaOffset[a]; j < helper.SinglesFromAlphaOffset[a + 1]; j++) {
+                size_t k;
+                pos -= helper.SinglesFromBetaOffset[b];
+                for (k = helper.SinglesFromBetaOffset[b] + idx_offset; k < helper.SinglesFromBetaOffset[b + 1]; k += nid) {
+                    helper.Hij[pos + k] = this->TwoExcite(DetI,
+                                        helper.SinglesAlphaCrAnSM[j], helper.SinglesBetaCrAnSM[k],
+                                        helper.SinglesAlphaCrAnSM[j + helper.size_single_alpha], helper.SinglesBetaCrAnSM[k + helper.size_single_beta]);
+                }
+                idx_offset = k - helper.SinglesFromBetaOffset[b + 1];
+                pos += helper.SinglesFromBetaOffset[b + 1];
+            }
+        }
+    }
+};
+
+
+template <typename ElemT>
+__global__ void make_hamiltonian_kernel(MakeHamiltonianKernel<ElemT> mk)
+{
+    extern __shared__ size_t det[];
+
+    size_t tid = blockIdx.x;
+    size_t nid = gridDim.x;
+    size_t size = mk.size();
+
+    for (size_t i = tid; i < size; i += nid) {
+        mk.make_hamiltonian(det, i);
+    }
+}
+
+
+template <typename ElemT>
+void MultTPBThrustPreHamiltonian<ElemT>::precalculateHamiltonian(size_t task)
+{
+    int mpi_rank_h = 0;
+    int mpi_size_h = 1;
+    MPI_Comm_rank(this->h_comm_, &mpi_rank_h);
+    MPI_Comm_size(this->h_comm_, &mpi_size_h);
+
+    size_t braAlphaSize = 0;
+    size_t braBetaSize = 0;
+
+    braAlphaSize = this->helper[task].braAlphaEnd - this->helper[task].braAlphaStart;
+    braBetaSize = this->helper[task].braBetaEnd - this->helper[task].braBetaStart;
+    size_t size = braAlphaSize * braBetaSize;
+
+    num_mult_threads[task] = 32;
+    if (size == 0) {
+        return;
+    }
+
+    hij_offset[task].resize(size + 1);
+    this->helper[task].Hij_offset = (size_t*)thrust::raw_pointer_cast(hij_offset[task].data());
+
+    CountHamiltonianKernel count_kernel(this->helper[task], *this);
+    count_kernel.set_mpi_size(mpi_rank_h, mpi_size_h);
+    {
+        auto ci = thrust::counting_iterator<size_t>(0);
+        SBD_NVTX_RANGE_COLOR("thrust::for_each_n", __LINE__);
+        thrust::for_each_n(thrust::device, ci, size, count_kernel);
+    }
+    // convert count to offset
+    thrust::inclusive_scan(thrust::device, hij_offset[task].begin(), hij_offset[task].end(), hij_offset[task].begin());
+    std::vector<size_t> offset(1);
+    thrust::copy_n(hij_offset[task].end() - 1, 1, offset.begin());
+
+    size_t max_threads = offset[0] / size;
+    if (max_threads > 1024)
+        max_threads = 1024;
+    while(num_mult_threads[task] * 2 <= max_threads) {
+        num_mult_threads[task] *= 2;
+    }
+
+    hij_storage[task].resize(offset[0]);
+    this->helper[task].Hij = (ElemT*)thrust::raw_pointer_cast(hij_storage[task].data());
+
+    MakeHamiltonianKernel make_kernel(this->helper[task], *this);
+    make_kernel.set_mpi_size(mpi_rank_h, mpi_size_h);
+    make_hamiltonian_kernel<<<num_gpu_blocks, num_mult_threads[task], this->D_size_ * sizeof(size_t)>>>(make_kernel);
+    SBD_CHECK_CUDA(cudaDeviceSynchronize());
+} // end function
+
+
+template <typename ElemT>
+class MultPreCalculatedHamiltonianKernel : public MultKernelBase<ElemT>
+{
+protected:
+    TaskHelpersThrust<ElemT> helper;
+public:
+    MultPreCalculatedHamiltonianKernel(const TaskHelpersThrust<ElemT>& h,
+                const thrust::device_vector<ElemT>& v_wb,
+                const thrust::device_vector<ElemT>& v_t,
+                const MultTPBThrustPreHamiltonian<ElemT>& data) : MultKernelBase<ElemT>(v_wb, v_t, data)
+    {
+        helper = h;
+    }
+
+    __device__ __host__ size_t size(void)
+    {
+        size_t braAlphaSize = helper.braAlphaEnd - helper.braAlphaStart;
+        size_t braBetaSize = helper.braBetaEnd - helper.braBetaStart;
+        size_t size = braAlphaSize * braBetaSize;
+        return size;
+    }
+
+    __device__ void mult(size_t i)
+    {
+        size_t braIdx = i;
+        size_t braBetaSize = helper.braBetaEnd - helper.braBetaStart;
+        size_t a = braIdx / braBetaSize;
+        size_t b = braIdx - a * braBetaSize;
+        size_t ia = a + helper.braAlphaStart;
+        size_t ib = b + helper.braBetaStart;
+        int tid = threadIdx.x;
+        int nid = blockDim.x;
+
+        if ((braIdx % this->mpi_size_h) != this->mpi_rank_h) return;
+
+        size_t pos = helper.Hij_offset[i];
+        ElemT e = 0.0;
+
+        if (helper.taskType == 2) {
+            size_t idx_offset = tid;
+            size_t j;
+            pos -= helper.SinglesFromAlphaOffset[a];
+            for (j = helper.SinglesFromAlphaOffset[a] + idx_offset; j < helper.SinglesFromAlphaOffset[a + 1]; j += nid) {
+                size_t ja = helper.SinglesFromAlphaKetIndex[j];
+                size_t jb = ib;
+                size_t ketIdx = (ja - helper.ketAlphaStart) * (helper.ketBetaEnd - helper.ketBetaStart)
+                                + jb - helper.ketBetaStart;
+                e += helper.Hij[pos + j] * this->T[ketIdx];
+            }
+            idx_offset = j - helper.SinglesFromAlphaOffset[a + 1];
+            pos += helper.SinglesFromAlphaOffset[a + 1] - helper.DoublesFromAlphaOffset[a];
+            for (j = helper.DoublesFromAlphaOffset[a] + idx_offset; j < helper.DoublesFromAlphaOffset[a + 1]; j += nid) {
+                size_t ja = helper.DoublesFromAlphaKetIndex[j];
+                size_t jb = ib;
+                size_t ketIdx = (ja - helper.ketAlphaStart) * (helper.ketBetaEnd - helper.ketBetaStart)
+                                + jb - helper.ketBetaStart;
+                e += helper.Hij[pos + j] * this->T[ketIdx];
+            }
+        } else if (helper.taskType == 1) {
+            size_t idx_offset = tid;
+            size_t k;
+            pos -= helper.SinglesFromBetaOffset[b];
+            for (k = helper.SinglesFromBetaOffset[b] + idx_offset; k < helper.SinglesFromBetaOffset[b + 1]; k += nid) {
+                size_t ja = ia;
+                size_t jb = helper.SinglesFromBetaKetIndex[k];
+                size_t ketIdx = (ja - helper.ketAlphaStart) * (helper.ketBetaEnd - helper.ketBetaStart)
+                                + jb - helper.ketBetaStart;
+                e += helper.Hij[pos + k] * this->T[ketIdx];
+            }
+            idx_offset = k - helper.SinglesFromBetaOffset[b + 1];
+            pos += helper.SinglesFromBetaOffset[b + 1] - helper.DoublesFromBetaOffset[b];
+            for (k = helper.DoublesFromBetaOffset[b] + idx_offset; k < helper.DoublesFromBetaOffset[b + 1]; k += nid) {
+                size_t ja = ia;
+                size_t jb = helper.DoublesFromBetaKetIndex[k];
+                size_t ketIdx = (ja - helper.ketAlphaStart) * (helper.ketBetaEnd - helper.ketBetaStart)
+                                + jb - helper.ketBetaStart;
+                e += helper.Hij[pos + k] * this->T[ketIdx];
+            }
+        } else {
+            size_t idx_offset = tid;
+            for (size_t j = helper.SinglesFromAlphaOffset[a]; j < helper.SinglesFromAlphaOffset[a + 1]; j++) {
+                size_t ja = helper.SinglesFromAlphaKetIndex[j];
+                size_t k;
+                pos -= helper.SinglesFromBetaOffset[b];
+                for (k = helper.SinglesFromBetaOffset[b] + idx_offset; k < helper.SinglesFromBetaOffset[b + 1]; k += nid) {
+                    size_t jb = helper.SinglesFromBetaKetIndex[k];
+                    size_t ketIdx = (ja - helper.ketAlphaStart) * (helper.ketBetaEnd - helper.ketBetaStart)
+                                    + jb - helper.ketBetaStart;
+                    e += helper.Hij[pos + k] * this->T[ketIdx];
+                }
+                idx_offset = k - helper.SinglesFromBetaOffset[b + 1];
+                pos += helper.SinglesFromBetaOffset[b + 1];
+            }
+        }
+        e = reduce_sum_threads_in_block(e);
+        if (tid == 0)
+            this->Wb[braIdx] += e;
+    }
+};
+
+
+template <typename ElemT>
+__global__ void mult_precalculated_hamiltonian_kernel(MultPreCalculatedHamiltonianKernel<ElemT> mk)
+{
+    size_t tid = blockIdx.x;
+    size_t nid = gridDim.x;
+    size_t size = mk.size();
+
+    for (size_t i = tid; i < size; i += nid) {
+        mk.mult(i);
+        __syncthreads();
+    }
+}
+
+template <typename ElemT>
+void MultTPBThrustPreHamiltonian<ElemT>::run(
+            const thrust::device_vector<ElemT> &hii,
+            const thrust::device_vector<ElemT> &Wk,
+            thrust::device_vector<ElemT> &Wb)
+{
+
+#ifdef SBD_DEBUG_TUNING
+    std::cout << " multiplication by Robert is called " << std::endl;
+#endif
+
+    int mpi_rank_h = 0;
+    int mpi_size_h = 1;
+    MPI_Comm_rank(this->h_comm_, &mpi_rank_h);
+    MPI_Comm_size(this->h_comm_, &mpi_size_h);
+
+    int mpi_size_b;
+    MPI_Comm_size(this->b_comm_, &mpi_size_b);
+    int mpi_rank_b;
+    MPI_Comm_rank(this->b_comm_, &mpi_rank_b);
+    int mpi_size_t;
+    MPI_Comm_size(this->t_comm_, &mpi_size_t);
+    int mpi_rank_t;
+    MPI_Comm_rank(this->t_comm_, &mpi_rank_t);
+    int mpi_size_a;
+    MPI_Comm_size(this->a_comm_, &mpi_size_a);
+    int mpi_rank_a;
+    MPI_Comm_rank(this->a_comm_, &mpi_rank_a);
+
+    size_t adet_min = 0;
+    size_t adet_max = this->adets.size();
+    size_t bdet_min = 0;
+    size_t bdet_max = this->bdets.size();
+    get_mpi_range(this->adet_comm_size,0,adet_min,adet_max);
+    get_mpi_range(this->bdet_comm_size,0,bdet_min,bdet_max);
+
+    thrust::device_vector<ElemT> T[2];
+    int active_T = 0;
+    int recv_T = 1;
+    size_t task_sent = 0;
+    Mpi2dSlider<ElemT> mpi2dslider;
+
+    auto time_copy_start = std::chrono::high_resolution_clock::now();
+    if (this->helper.size() != 0) {
+        if (mpi_size_b > 1) {
+            Mpi2dSlide(Wk, T[active_T], this->adet_comm_size, this->bdet_comm_size,
+                        -this->helper[0].adetShift, -this->helper[0].bdetShift, this->b_comm_);
+        } else {
+            T[active_T] = Wk;
+        }
+    }
+    auto time_copy_end = std::chrono::high_resolution_clock::now();
+
+    auto time_mult_start = std::chrono::high_resolution_clock::now();
+
+    if (mpi_rank_t == 0) {
+        auto ci = thrust::counting_iterator<size_t>(0);
+        {
+            SBD_NVTX_RANGE_COLOR("thrust::for_each_n", __LINE__);
+            thrust::for_each_n(thrust::device, ci, T[active_T].size(), Wb_init_kernel(Wb, hii, T[active_T]));
+        }
+    }
+
+    double time_slid = 0.0;
+    for (size_t task = 0; task < this->helper.size(); task++) {
+        SBD_NVTX_RANGE_COLOR("for (size_t task ...", __LINE__ + task);
+#ifdef SBD_DEBUG_MULT
+        auto time_task_start = std::chrono::high_resolution_clock::now();
+        std::cout << " Start multiplication for task " << task << " at (h,b,t) = ("
+                    << mpi_rank_h << "," << mpi_rank_b << "," << mpi_rank_t << "): task type = "
+                    << this->helper[task].taskType << ", bra-adet range = ["
+                    << this->helper[task].braAlphaStart << "," << this->helper[task].braAlphaEnd << "), bra-bdet range = ["
+                    << this->helper[task].braBetaStart << "," << this->helper[task].braBetaEnd << "), ket-adet range = ["
+                    << this->helper[task].ketAlphaStart << "," << this->helper[task].ketAlphaEnd << "), ket-bdet range = ["
+                    << this->helper[task].ketBetaStart << "," << this->helper[task].ketBetaEnd << "), ket wf =";
+        for (size_t i = 0; i < std::min(static_cast<size_t>(4), T[active_T].size()); i++) {
+            std::cout << " " << T[active_T][i];
+        }
+        std::cout << std::endl;
+#endif
+
+        // synchronize 2d slide
+        if (task_sent == task) {
+            if (task_sent != 0) {
+                auto time_slid_start = std::chrono::high_resolution_clock::now();
+                if (mpi2dslider.Sync(this->b_comm_)) {
+                    int t = active_T;
+                    active_T = recv_T;
+                    recv_T = t;
+                }
+                auto time_slid_end = std::chrono::high_resolution_clock::now();
+                auto time_slid_count = std::chrono::duration_cast<std::chrono::microseconds>(time_slid_end - time_slid_start).count();
+                time_slid += 1.0e-6 * time_slid_count;
+            }
+
+            // exchange T asynchronously for later tasks
+            for (size_t extask = task_sent; extask < this->helper.size() - 1; extask++) {
+                if (this->helper[extask].taskType == 0) {
+#ifdef SBD_DEBUG_MULT
+                    size_t adet_rank = mpi_rank_b / this->bdet_comm_size;
+                    size_t bdet_rank = mpi_rank_b % this->bdet_comm_size;
+                    size_t adet_rank_task = (adet_rank + this->helper[extask].adetShift) % this->adet_comm_size;
+                    size_t bdet_rank_task = (bdet_rank + this->helper[extask].bdetShift) % this->bdet_comm_size;
+                    size_t adet_rank_next = (adet_rank + this->helper[extask + 1].adetShift) % this->adet_comm_size;
+                    size_t bdet_rank_next = (bdet_rank + this->helper[extask + 1].bdetShift) % this->bdet_comm_size;
+                    std::cout << " mult: task " << task << " at mpi process (h,b,t) = ("
+                                << mpi_rank_h << "," << mpi_rank_b << "," << mpi_rank_t
+                                << "): two-dimensional slide communication from ("
+                                << adet_rank_task << "," << bdet_rank_task << ") to ("
+                                << adet_rank_next << "," << bdet_rank_next << ")"
+                                << std::endl;
+#endif
+                    int adetslide = this->helper[extask].adetShift - this->helper[extask + 1].adetShift;
+                    int bdetslide = this->helper[extask].bdetShift - this->helper[extask + 1].bdetShift;
+                    mpi2dslider.ExchangeAsync(T[active_T], T[recv_T], this->adet_comm_size, this->bdet_comm_size, adetslide, bdetslide, this->b_comm_, extask);
+                    task_sent = extask + 1;
+                    break;
+                }
+            }
+        }
+
+
+        MultPreCalculatedHamiltonianKernel kernel(this->helper[task], Wb, T[active_T], *this);
+        kernel.set_mpi_size(mpi_rank_h, mpi_size_h);
+        mult_precalculated_hamiltonian_kernel<<<num_gpu_blocks, num_mult_threads[task]>>>(kernel);
+        SBD_CHECK_CUDA(cudaDeviceSynchronize());
+
+#ifdef SBD_DEBUG_MULT
+        auto time_task_end = std::chrono::high_resolution_clock::now();
+        auto time_task_count = std::chrono::duration_cast<std::chrono::microseconds>(time_task_end - time_task_start).count();
+        std::cout << "     time for task " << task << " [" << this->helper[task].taskType << "] : " << 1.0e-6 * time_task_count << std::endl;
+#endif
+    } // end for(size_t task=0; task < helper.size(); task++)
+
+    auto time_mult_end = std::chrono::high_resolution_clock::now();
+
+    auto time_comm_start = std::chrono::high_resolution_clock::now();
+#ifdef SBD_USE_NCCL
+    if (mpi_size_a > 1) {
+        nccl_allreduce(Wb, ncclSum, this->a_nccl_comm_);
+    }
+#else
+    if (mpi_size_t > 1) {
+        MpiAllreduce(Wb, MPI_SUM, this->t_comm_);
+    }
+    if (mpi_size_h > 1) {
+        MpiAllreduce(Wb, MPI_SUM, this->h_comm_);
+    }
+#endif
+    auto time_comm_end = std::chrono::high_resolution_clock::now();
+
+#ifdef SBD_DEBUG_MULT
+    auto time_copy_count = std::chrono::duration_cast<std::chrono::microseconds>(time_copy_end - time_copy_start).count();
+    auto time_mult_count = std::chrono::duration_cast<std::chrono::microseconds>(time_mult_end - time_mult_start).count();
+    auto time_comm_count = std::chrono::duration_cast<std::chrono::microseconds>(time_comm_end - time_comm_start).count();
+
+    double time_copy = 1.0e-6 * time_copy_count;
+    double time_mult = 1.0e-6 * time_mult_count;
+    double time_comm = 1.0e-6 * time_comm_count;
+    std::cout << " mult: time for first copy     = " << time_copy << std::endl;
+    std::cout << " mult: time for multiplication = " << time_mult << std::endl;
+    std::cout << " mult: time for 2d slide comm  = " << time_slid << std::endl;
+    std::cout << " mult: time for allreduce comm = " << time_comm << std::endl;
+#endif
+} // end function
+
+
+template <typename ElemT>
+class MakeQChamDiagTermPreHamiltonianKernel : public MultKernelBase<ElemT>
+{
+protected:
+    TaskHelpersThrust<ElemT> helper;
+    ElemT* hii;
+public:
+    MakeQChamDiagTermPreHamiltonianKernel(thrust::device_vector<ElemT>& hii_in, const TaskHelpersThrust<ElemT>& h, const MultTPBThrustPreHamiltonian<ElemT>& data)
+                        : MultKernelBase<ElemT>(data)
+    {
+        helper = h;
+        hii = (ElemT*)thrust::raw_pointer_cast(hii_in.data());
+    }
+
+    __device__ __host__ size_t size(void)
+    {
+        size_t braAlphaSize = helper.braAlphaEnd - helper.braAlphaStart;
+        size_t braBetaSize = helper.braBetaEnd - helper.braBetaStart;
+        size_t size = braAlphaSize * braBetaSize;
+        return size;
+    }
+
+    __device__ void run(size_t* Det, size_t i)
+    {
+        size_t braIdx = i;
+        if ((braIdx % this->mpi_size_h) != this->mpi_rank_h) return;
+        size_t braBetaSize = helper.braBetaEnd - helper.braBetaStart;
+        size_t a = braIdx / braBetaSize;
+        size_t b = braIdx - a * braBetaSize;
+        size_t ia = a + helper.braAlphaStart;
+        size_t ib = b + helper.braBetaStart;
+        size_t* DetI = Det + threadIdx.x * this->D_size;
+        this->DetFromAlphaBeta(DetI, this->adets + ia * this->D_half_size, this->bdets + ib * this->D_half_size);
+        hii[braIdx] = this->ZeroExcite(DetI);
+    }
+};
+
+template <typename ElemT>
+__global__ void make_qchem_kernel(MakeQChamDiagTermPreHamiltonianKernel<ElemT> mk)
+{
+    extern __shared__ size_t det[];
+
+    size_t tid = threadIdx.x + blockIdx.x * blockDim.x;
+    size_t nid = blockDim.x * gridDim.x;
+    size_t size = mk.size();
+
+    for (size_t i = tid; i < size; i += nid) {
+        mk.run(det, i);
+    }
+}
+
+template <typename ElemT>
+void MultTPBThrustPreHamiltonian<ElemT>::makeQChamDiagTerms(thrust::device_vector<ElemT> &hii)
+{
+    int mpi_rank_h = 0;
+    int mpi_size_h = 1;
+    MPI_Comm_rank(this->h_comm_, &mpi_rank_h);
+    MPI_Comm_size(this->h_comm_, &mpi_size_h);
+
+    size_t braAlphaSize = 0;
+    size_t braBetaSize = 0;
+    if( this->helper.size() != 0 ) {
+        braAlphaSize = this->helper[0].braAlphaEnd - this->helper[0].braAlphaStart;
+        braBetaSize = this->helper[0].braBetaEnd - this->helper[0].braBetaStart;
+    }
+    size_t braSize = braAlphaSize * braBetaSize;
+    hii.resize(braSize, ElemT(0.0));
+    if (braSize == 0) return;
+
+    size_t max_threads = SBD_MAX_DYNAMIC_SHARED_BYTES / (this->D_size_ * sizeof(size_t));
+    if (max_threads > 1024)
+        max_threads = 1024;
+    size_t nthreads = 1;
+    while(nthreads * 2 <= max_threads) {
+        nthreads *= 2;
+    }
+    size_t nblocks = std::max(((braSize + nthreads - 1) / nthreads + 3) / 4, (size_t)1);
+
+    MakeQChamDiagTermPreHamiltonianKernel kernel(hii, this->helper[0], *this);
+    kernel.set_mpi_size(mpi_rank_h, mpi_size_h);
+    make_qchem_kernel<<<nblocks, nthreads, nthreads * this->D_size_ * sizeof(size_t)>>>(kernel);
+    SBD_CHECK_CUDA(cudaDeviceSynchronize());
 }
 
 

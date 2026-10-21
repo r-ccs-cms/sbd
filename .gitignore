@@ -40,6 +40,7 @@ cmake_install.cmake
 *.xcuserstate
 *.xcuserdatad
 *.xcodeproj
+.claude/
 
 # ---- other backup files ----
 *~

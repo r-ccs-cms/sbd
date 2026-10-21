@@ -46,6 +46,7 @@
         "CMAKE_SYSTEM_NAME":             "CrayLinuxEnvironment",
         "SBD_GPU_BACKEND":               "thrust",
         "SBD_GPU_ARCH":                  "cc90",
+        "sbd_memory_mode":               "unified",
         "SBD_THRUST_SAFE_MPI_ALLREDUCE": "ON"
       }
     },
@@ -59,6 +60,7 @@
         "CMAKE_BUILD_TYPE":              "Release",
         "SBD_GPU_BACKEND":               "thrust",
         "SBD_GPU_ARCH":                  "cc90",
+        "sbd_memory_mode":               "unified",
         "SBD_THRUST_SAFE_MPI_ALLREDUCE": "ON"
       }
     },

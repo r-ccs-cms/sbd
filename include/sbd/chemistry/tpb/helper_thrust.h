@@ -57,6 +57,10 @@ public:
     size_t size_single_beta = 0;
     size_t size_double_beta = 0;
 
+    // Pre-calculated Hamiltonian
+    ElemT* Hij = nullptr;
+    size_t* Hij_offset = nullptr;
+
     TaskHelpersThrust() {}
 
     TaskHelpersThrust(const TaskHelpersThrust<ElemT>& other)
@@ -98,6 +102,9 @@ public:
         size_double_alpha = other.size_double_alpha;
         size_single_beta = other.size_single_beta;
         size_double_beta = other.size_double_beta;
+
+        Hij = other.Hij;
+        Hij_offset = other.Hij_offset;
     }
 
     TaskHelpersThrust(thrust::device_vector<size_t>& storage, thrust::device_vector<int>& cran_storage, const TaskHelpers& helper, bool store_offset = false)
@@ -429,6 +436,9 @@ public:
         }
 
 #ifdef SBD_REORDER_INDEX_ARRAY
+        // reordering is applicable for loop collapsing mode only
+        if (store_offset)
+            return;
         //
         // Reorder excitation entries using a block-based permutation
         // derived from KetIndex.
