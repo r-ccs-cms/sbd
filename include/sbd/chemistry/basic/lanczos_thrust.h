@@ -111,6 +111,16 @@ void LanczosImpl(const thrust::device_vector<ElemT> &hii,
 			// C[ib + 1][is] = HC[is];
 			C[ib + 1] = HC;
 
+			// Full reorthogonalization: without it C loses orthogonality once an eigenvalue
+			// converges, giving ghost eigenvalues and a restart vector of the wrong norm
+			for (int kb = 0; kb < ib + 1; kb++) {
+				ElemT olap;
+				InnerProduct(C[kb], C[ib + 1], olap, mult.b_comm());
+				olap *= ElemT(-1.0);
+				thrust::transform(policy, C[kb].begin(), C[kb].end(), C[ib + 1].begin(), C[ib + 1].begin(), AXPY_kernel<ElemT>(olap));
+			}
+			Space::sync();
+
 			Normalize(C[ib + 1], A[ij], mult.b_comm());
 			A[ji] = A[ij];
 
@@ -157,6 +167,8 @@ void LanczosImpl(const thrust::device_vector<ElemT> &hii,
 				thrust::transform(policy, C[ib].begin(), C[ib].end(), W_dev.begin(), W_dev.begin(), AXPY_kernel<ElemT>(U[ib]));
 			}
 		}
+		RealT norm_W;
+		Normalize(W_dev, norm_W, mult.b_comm());
 		if (stop_it) {
 			break;
 		}

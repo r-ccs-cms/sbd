@@ -103,6 +103,18 @@ namespace sbd {
 	  C[ib+1][is] = HC[is];
 	}
 
+	// Full reorthogonalization: without it C loses orthogonality once an eigenvalue
+	// converges, giving ghost eigenvalues and a restart vector of the wrong norm
+	for(int kb=0; kb < ib+1; kb++) {
+	  ElemT olap;
+	  InnerProduct(C[kb],C[ib+1],olap,b_comm);
+	  olap *= ElemT(-1.0);
+#pragma omp parallel for
+	  for(size_t is=0; is < W.size(); is++) {
+	    C[ib+1][is] += C[kb][is]*olap;
+	  }
+	}
+
 	Normalize(C[ib+1],A[ij],b_comm);
 	A[ji] = A[ij];
 
@@ -155,6 +167,8 @@ namespace sbd {
 	  }
 	}
       }
+      RealT norm_W;
+      Normalize(W,norm_W,b_comm);
       if( stop_it ) {
 	break;
       }
@@ -260,6 +274,18 @@ namespace sbd {
 	  C[ib+1][is] = HC[is];
 	}
 
+	// Full reorthogonalization: without it C loses orthogonality once an eigenvalue
+	// converges, giving ghost eigenvalues and a restart vector of the wrong norm
+	for(int kb=0; kb < ib+1; kb++) {
+	  ElemT olap;
+	  InnerProduct(C[kb],C[ib+1],olap,b_comm);
+	  olap *= ElemT(-1.0);
+#pragma omp parallel for
+	  for(size_t is=0; is < W.size(); is++) {
+	    C[ib+1][is] += C[kb][is]*olap;
+	  }
+	}
+
 	Normalize(C[ib+1],A[ij],b_comm);
 	A[ji] = A[ij];
 
@@ -312,6 +338,8 @@ namespace sbd {
 	  }
 	}
       }
+      RealT norm_W;
+      Normalize(W,norm_W,b_comm);
       if( stop_it ) {
 	break;
       }
