@@ -429,6 +429,9 @@ public:
         }
 
 #ifdef SBD_REORDER_INDEX_ARRAY
+        // Row offsets require entries to remain grouped by bra determinant.
+        if (store_offset) return;
+
         //
         // Reorder excitation entries using a block-based permutation
         // derived from KetIndex.

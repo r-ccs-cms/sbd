@@ -1688,7 +1688,7 @@ public:
                 size_t b = braIdx - a * braBetaSize;
                 size_t ia = a + helper.braAlphaStart;
                 size_t ib = b + helper.braBetaStart;
-                this->DetFromAlphaBeta(Det, this->adets + ia * this->D_size, this->bdets + ib * this->D_size);
+                this->DetFromAlphaBeta(Det, this->adets + ia * this->D_half_size, this->bdets + ib * this->D_half_size);
             }
             hii[braIdx] = this->ZeroExcite(Det);
         }
