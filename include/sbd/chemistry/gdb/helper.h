@@ -8,6 +8,9 @@
 #include "sbd/framework/type_def.h"
 #include "sbd/framework/mpi_utility.h"
 #include "sbd/framework/bit_manipulation.h"
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 namespace sbd {
 
@@ -419,24 +422,47 @@ namespace sbd {
       onecran.resize(hdet_bra.size());
       doubles.resize(hdet_bra.size());
       twocran.resize(hdet_bra.size());
+      // Count, reserve on the calling thread, then fill: OpenMP workers allocating
+      // under NVHPC's unified-memory allocator can stall (the TPB helper's fix, upstream #107).
+      std::vector<size_t> zcount(hdet_bra.size());
+      std::vector<size_t> scount(hdet_bra.size());
+      std::vector<size_t> dcount(hdet_bra.size());
 #pragma omp parallel for
       for(size_t i=0; i < hdet_bra.size(); i++) {
-	size_t zcount = 0;
-	size_t scount = 0;
-	size_t dcount = 0;
+	size_t z = 0;
+	size_t s = 0;
+	size_t d2 = 0;
 	for(size_t j=0; j < hdet_ket.size(); j++) {
 	  int d = difference(hdet_bra[i],hdet_ket[j],bit_length,norb);
-	  if( d == 0 ) zcount++;
-	  if( d == 2 ) scount++;
-	  if( d == 4 ) dcount++;
+	  if( d == 0 ) z++;
+	  if( d == 2 ) s++;
+	  if( d == 4 ) d2++;
 	}
-	samedet[i].reserve(zcount);
-	singles[i].reserve(scount);
-	onecran[i].reserve(2*scount);
-	doubles[i].reserve(dcount);
-	twocran[i].reserve(4*dcount);
-	std::vector<int> cr(2);
-	std::vector<int> an(2);
+	zcount[i] = z;
+	scount[i] = s;
+	dcount[i] = d2;
+      }
+      for(size_t i=0; i < hdet_bra.size(); i++) {
+	samedet[i].reserve(zcount[i]);
+	singles[i].reserve(scount[i]);
+	onecran[i].reserve(2*scount[i]);
+	doubles[i].reserve(dcount[i]);
+	twocran[i].reserve(4*dcount[i]);
+      }
+      int nthreads = 1;
+#ifdef _OPENMP
+      nthreads = omp_get_max_threads();
+#endif
+      std::vector<std::vector<int>> cr_scratch(nthreads,std::vector<int>(2));
+      std::vector<std::vector<int>> an_scratch(nthreads,std::vector<int>(2));
+#pragma omp parallel for
+      for(size_t i=0; i < hdet_bra.size(); i++) {
+	int tid = 0;
+#ifdef _OPENMP
+	tid = omp_get_thread_num();
+#endif
+	std::vector<int> & cr = cr_scratch[tid];
+	std::vector<int> & an = an_scratch[tid];
 	for(size_t j=0; j < hdet_ket.size(); j++) {
 	  int d = difference(hdet_bra[i],hdet_ket[j],bit_length,norb);
 	  if( d == 0 ) {
