@@ -269,6 +269,70 @@ public:
         const ElemT sgn = ((A > J || B < I) ^ parity_I_A ^ parity_J_B) ? ElemT(-1) : ElemT(1);
         return sgn * (I2.Value(A, I, B, J) - I2.Value(A, J, B, I));
     }
+
+    // Device-side counterpart of sbd::OrbitalDifference (basic/determinants.h).
+    // Writes up to two created orbitals into x and up to two annihilated orbitals
+    // into y, i.e. the caller must provide arrays of at least 2 elements each.
+    // Returns the number of created orbitals found (== number annihilated for a
+    // particle-number-conserving pair); callers use it to distinguish single (1)
+    // from double (2) excitations.
+    __device__ __host__ size_t OrbitalDifference(const size_t *DetA, const size_t *DetB, size_t* x, size_t* y)
+    {
+        x[0] = 0;
+        x[1] = 0;
+        y[0] = 0;
+        y[1] = 0;
+        size_t na = 0;
+        size_t nb = 0;
+        size_t L = norbs;
+
+        size_t full_words = (2 * L) / bit_length;
+        size_t remaining_bits = (2 * L) % bit_length;
+
+        for (size_t i = 0; i < full_words; ++i) {
+            size_t diff_a = DetA[i] & ~DetB[i];
+            size_t diff_b = DetB[i] & ~DetA[i];
+            for (size_t bit_pos = 0; bit_pos < bit_length; ++bit_pos) {
+                if (diff_a & (static_cast<size_t>(1) << bit_pos)) {
+                    if (na == 0)
+                        x[0] = i * bit_length + bit_pos;
+                    else if (na == 1)
+                        x[1] = i * bit_length + bit_pos;
+                    na++;
+                }
+                if (diff_b & (static_cast<size_t>(1) << bit_pos)) {
+                    if (nb == 0)
+                        y[0] = i * bit_length + bit_pos;
+                    else if (nb == 1)
+                        y[1] = i * bit_length + bit_pos;
+                    nb++;
+                }
+            }
+        }
+
+        if (remaining_bits > 0) {
+            size_t mask = (static_cast<size_t>(1) << remaining_bits) - 1;
+            size_t diff_a = (DetA[full_words] & ~DetB[full_words]) & mask;
+            size_t diff_b = (DetB[full_words] & ~DetA[full_words]) & mask;
+            for (size_t bit_pos = 0; bit_pos < remaining_bits; ++bit_pos) {
+                if (diff_a & (static_cast<size_t>(1) << bit_pos)) {
+                    if (na == 0)
+                        x[0] = bit_length * full_words + bit_pos;
+                    else if (na == 1)
+                        x[1] = bit_length * full_words + bit_pos;
+                    na++;
+                }
+                if (diff_b & (static_cast<size_t>(1) << bit_pos)) {
+                    if (nb == 0)
+                        y[0] = bit_length * full_words + bit_pos;
+                    else if (nb == 1)
+                        y[1] = bit_length * full_words + bit_pos;
+                    nb++;
+                }
+            }
+        }
+        return na;
+    }
 };
 
 }
