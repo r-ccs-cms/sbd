@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(nvidia-smi -L)",
+      "Bash(awk 'NR>=449 && NR<=460' include/sbd/chemistry/tpb/helper_thrust.h)",
+      "Bash(awk 'NR>=133 && NR<=135; NR>=156 && NR<=158' include/sbd/chemistry/tpb/helper_thrust.h)",
+      "Bash(awk 'NR>=179 && NR<=200' include/sbd/chemistry/tpb/helper_thrust.h)",
+      "Bash(cmake --build . -j 8)",
+      "Read(//opt/nvidia/hpc_sdk/Linux_x86_64/25.9/comm_libs/hpcx/bin/**)",
+      "Bash(nvc++ --version)",
+      "Bash(g++ --version)",
+      "Bash(python3 -)",
+      "Bash(awk 'NR>=455 && NR<=475' include/sbd/chemistry/tpb/helper_thrust.h)",
+      "Bash(awk 'NR>=645 && NR<=665' include/sbd/chemistry/tpb/helper_thrust.h)",
+      "Bash(awk 'NR>=207 && /^#endif/ {print NR\": \"$0}' include/sbd/chemistry/tpb/helper_thrust.h)",
+      "Bash(sed -n '207,404p' include/sbd/chemistry/tpb/helper_thrust.h)",
+      "Read(//tmp/**)",
+      "Bash(timeout 120 cmake --build . --target tpb_diag)",
+      "Bash(cd /mnt/c/dev/Quantum/qcsc/sbd/pr/opt_tpb_gpu/sbd; awk 'NR<201 || NR>404' include/sbd/chemistry/tpb/helper_thrust.h > include/sbd/chemistry/tpb/helper_thrust.h.new && wc -l include/sbd/chemistry/tpb/helper_thrust.h include/sbd/chemistry/tpb/helper_thrust.h.new && sed -n '190,210p' include/sbd/chemistry/tpb/helper_thrust.h.new)",
+      "Bash(cd /mnt/c/dev/Quantum/qcsc/sbd/pr/opt_tpb_gpu/sbd/include/sbd/chemistry/tpb && mv helper_thrust.h.new helper_thrust.h && wc -l helper_thrust.h && tr -cd '{' < helper_thrust.h | wc -c && tr -cd '}' < helper_thrust.h | wc -c)",
+      "Bash(timeout 90 cmake --build . --target tpb_diag)"
+    ]
+  }
+}

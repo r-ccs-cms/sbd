@@ -95,7 +95,9 @@ function(sbd_configure_diag target)
       $<$<BOOL:${SBD_USE_CUBLAS}>:SBD_USE_CUBLAS>
       $<$<BOOL:${SBD_USE_THRUST_NOSYNC}>:SBD_USE_THRUST_NOSYNC>
     )
-    set(sbd_memory_mode "unified")
+    if (NOT DEFINED sbd_memory_mode)
+      set(sbd_memory_mode "unified")
+    endif()
     if(ARGC GREATER 1)
       set(sbd_memory_mode "${ARGV1}")
     endif()
