@@ -7,6 +7,8 @@
 
 #include "sbd/framework/timestamp.h"
 #include "sbd/framework/determinant_initialization.h"
+#include <random>
+#include <type_traits>
 
 namespace sbd {
   namespace gdb {
@@ -42,6 +44,11 @@ namespace sbd {
 #ifdef SBD_THRUST
       bool cpu_subspace = false;
 #endif
+      // --factored_mult 1: H·C from string factors on a staircase of the basis, the rest per element
+      // (mult_staircase_thrust.h; Thrust builds, real coefficients); --factored_mult_check 1
+      // compares it with the default multiplication first
+      int factored_mult = 0;
+      int factored_mult_check = 0;
     };
 
     SBD generate_sbd_data(int argc, char * argv[]) {
@@ -135,7 +142,18 @@ namespace sbd {
 	  sbd_data.cpu_subspace = std::atoi(argv[++i]) == 1;
 	}
 #endif
+	if( std::string(argv[i]) == "--factored_mult" ) {
+	  sbd_data.factored_mult = std::atoi(argv[++i]);
+	}
+	if( std::string(argv[i]) == "--factored_mult_check" ) {
+	  sbd_data.factored_mult_check = std::atoi(argv[++i]);
+	}
       }
+#ifndef SBD_THRUST
+      if( sbd_data.factored_mult != 0 ) {
+	throw std::invalid_argument("--factored_mult 1 needs a Thrust (CUDA) build of sbd");
+      }
+#endif
       return sbd_data;
     }
 
@@ -337,6 +355,19 @@ namespace sbd {
 #ifdef SBD_THRUST
 	// multiplyer class for TPB on Thrust
 	MultGDBThrust<ElemT> device_mult;
+	MultGDBStaircase stair_mult;
+	const bool use_stair = sbd_data.factored_mult != 0;
+	MultBase<ElemT>* thrust_mult = &device_mult;
+	if( use_stair && method != 0 ) {
+	  throw std::invalid_argument("--factored_mult 1 needs --method 0 (it replaces the stored Hamiltonian)");
+	}
+	if( use_stair ) {
+	  if constexpr (std::is_same<ElemT, double>::value) {
+	    thrust_mult = &stair_mult;
+	  } else {
+	    throw std::invalid_argument("--factored_mult 1: real coefficients only");
+	  }
+	}
 #endif
       if( method == 0 ) {
 
@@ -349,10 +380,46 @@ namespace sbd {
 	auto time_start_mkham = std::chrono::high_resolution_clock::now();
 #ifdef SBD_THRUST
 	thrust::device_vector<ElemT> hii;
-	device_mult.Init(bit_length,static_cast<size_t>(L),det,
+	// the default multiplier is still needed for --factored_mult_check 1 and the RDMs
+	if( !use_stair || sbd_data.factored_mult_check || do_rdm ) {
+	  device_mult.Init(bit_length,static_cast<size_t>(L),det,
 					idxmap,exidx,I0,I1,I2,
 		 			h_comm,b_comm,t_comm);
-	device_mult.makeQChamDiagTerms(hii);
+	}
+	if( !use_stair ) {
+	  device_mult.makeQChamDiagTerms(hii);
+	} else {
+	  if constexpr (std::is_same<ElemT, double>::value) {
+	    stair_mult.Init(bit_length,static_cast<size_t>(L),det,I0,I1,I2,h_comm,b_comm,t_comm);
+	    stair_mult.makeQChamDiagTerms(hii);
+	    if( sbd_data.factored_mult_check ) {
+	      thrust::device_vector<ElemT> hii_ref;
+	      device_mult.makeQChamDiagTerms(hii_ref);
+	      std::vector<ElemT> xh(hii.size());
+	      std::mt19937 gen(17 + mpi_rank_b);
+	      std::uniform_real_distribution<double> dist(-1.0, 1.0);
+	      for( auto &v : xh ) v = dist(gen);
+	      thrust::device_vector<ElemT> x(xh.begin(), xh.end()), y(xh.size(), 0.0), y_ref(xh.size(), 0.0);
+	      stair_mult.run(hii, x, y);
+	      device_mult.run(hii_ref, x, y_ref);
+	      auto rel = [&](const thrust::device_vector<ElemT> &a, const thrust::device_vector<ElemT> &b) {
+	        std::vector<ElemT> ah(a.size()), bh(b.size());
+	        thrust::copy(a.begin(), a.end(), ah.begin());
+	        thrust::copy(b.begin(), b.end(), bh.begin());
+	        double dr[2] = {0.0, 0.0}, sum[2];
+	        for( size_t i = 0; i < ah.size(); i++ ) { dr[0] += (ah[i]-bh[i])*(ah[i]-bh[i]); dr[1] += bh[i]*bh[i]; }
+	        MPI_Allreduce(dr, sum, 2, MPI_DOUBLE, MPI_SUM, b_comm);
+	        return std::sqrt(sum[0] / sum[1]);
+	      };
+	      const double diag_diff = rel(hii, hii_ref), mult_diff = rel(y, y_ref);  // collective: on every rank
+	      if( mpi_rank == 0 ) {
+		std::cout.precision(3);
+		std::cout << " factored_mult check against the default multiplication: diagonal rel diff "
+			  << diag_diff << ", H*x rel diff " << mult_diff << std::endl;
+	      }
+	    }
+	  }
+	}
 #else
 	std::vector<ElemT> hii;
 	makeQChamDiagTerms(det,bit_length,L,
@@ -377,8 +444,9 @@ namespace sbd {
 	}
 	auto time_start_david = std::chrono::high_resolution_clock::now();
 #ifdef SBD_THRUST
-	sbd::Davidson(hii, w, device_mult,
+	sbd::Davidson(hii, w, *thrust_mult,
 			max_it,max_nb,eps,max_time,sbd_data.cpu_subspace);
+	if( use_stair ) stair_mult.PrintTimes();  // collective
 #else
 	Davidson(hii,w,det,bit_length,static_cast<size_t>(L),
 		 idxmap,exidx,I0,I1,I2,
@@ -414,7 +482,7 @@ namespace sbd {
 
     thrust::device_vector<ElemT> v(w.size(), ElemT(0.0));
 
-	device_mult.run(hii, w_dev, v);
+	thrust_mult->run(hii, w_dev, v);
 
 	ElemT E;
 	InnerProduct(w_dev,v,E,b_comm);

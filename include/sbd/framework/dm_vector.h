@@ -20,9 +20,10 @@ namespace sbd {
     W = std::vector<ElemT>(w_size,ElemT(0.0));
   }
 
-  template <typename ElemT>
-  void InnerProduct(const std::vector<ElemT> & X,
-		    const std::vector<ElemT> & Y,
+  // Alloc: any std::vector allocator (the host Davidson subspace uses one without zero-fill)
+  template <typename ElemT, typename Alloc>
+  void InnerProduct(const std::vector<ElemT, Alloc> & X,
+		    const std::vector<ElemT, Alloc> & Y,
 		    ElemT & res,
 		    MPI_Comm comm) {
     int nth = omp_get_max_threads();
@@ -50,8 +51,8 @@ namespace sbd {
     MPI_Allreduce(&sum,&res,1,DataT,MPI_SUM,comm);
   }
 
-  template <typename ElemT, typename RealT>
-  void Normalize(std::vector<ElemT> & X,
+  template <typename ElemT, typename RealT, typename Alloc>
+  void Normalize(std::vector<ElemT, Alloc> & X,
 		 RealT & res,
 		 MPI_Comm comm) {
     res = 0.0;

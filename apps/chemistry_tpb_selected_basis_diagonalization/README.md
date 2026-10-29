@@ -111,6 +111,19 @@ Below is an explanation of each command-line option.
   The Hamiltonian is still applied on the GPU: each vector is copied through two GPU buffers, so the GPU memory used by the subspace no longer grows with `--block`.
   Operations on the subspace vectors run on the CPU with OpenMP (GPU builds of this app require more than one OpenMP thread in any case; see below).
   Energies agree with the default to within rounding.
+- `--factored_mult <int>`:
+  GPU (Thrust) builds only. If set to 1, the Hamiltonian is applied to the wavefunction through its factorization over the alpha and beta strings
+  (same-spin terms as sparse products on each side, the opposite-spin term as dense matrix products) instead of element by element (default: 0).
+  It is much faster than `--method 0` and needs no stored Hamiltonian; `--method` then only chooses the eigensolver (0 or 1: Davidson, 2 or 3: Lanczos).
+  Requirements: real coefficients, at most 64 orbitals, at most 2^19 beta strings, `--task_comm_size 1` and `--bdet_comm_size 1`
+  (the ranks split the alpha strings, `--adet_comm_size` ranks in all). Ranks on more than one node need a build with `SBD_USE_NCCL=ON`; ranks on one node need either `SBD_USE_NCCL=ON` or GPU-aware MPI (`SBD_NON_CUDA_AWARE_MPI=OFF`, and GPU support enabled at run time, `MPICH_GPU_SUPPORT_ENABLED=1` on Cray MPICH; SBD checks this at startup with Cray MPICH and Open MPI).
+  `--rdm 1` still uses the `--method 0` multiplication for the density matrices.
+- `--factored_mult_check <int>`:
+  With `--factored_mult 1`: if set to 1, compare the factored multiplication with the `--method 0` multiplication on a test vector before the
+  eigensolver starts, and print the relative differences (expect about 1e-15).
+- `--factored_passes <int>`:
+  With `--factored_mult 1`: bring the wavefunction to each GPU in this many parts per multiplication, to save GPU memory.
+  0 (the default) chooses the smallest number that fits in the free GPU memory.
 
 ### OpenMP threads in GPU builds
 

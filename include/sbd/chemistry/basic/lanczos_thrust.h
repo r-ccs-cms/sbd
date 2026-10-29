@@ -58,15 +58,17 @@ void LanczosImpl(const thrust::device_vector<ElemT> &hii,
 //	std::vector<std::vector<ElemT>> C(num_block, W);
 
     // copyin W
-    Vector W_dev(W.size());
+    Vector W_dev;
+    Space::allocate(W_dev, W.size());
     thrust::copy_n(W.begin(), W.size(), W_dev.begin());
 
     std::vector<Vector> C(num_block);
-    Vector HC(W.size());
+    Vector HC;
+    Space::allocate(HC, W.size());
     SubspaceMult<Space, ElemT> smult(mult, hii, W.size());
     for (int i = 0; i < num_block; i++) {
-        C[i].resize(W.size());
-		C[i] = W_dev;
+        Space::allocate(C[i], W.size());
+        thrust::copy(policy, W_dev.begin(), W_dev.end(), C[i].begin());
     }
 
 	for (int it = 0; it < max_iteration; it++) {
@@ -78,7 +80,7 @@ void LanczosImpl(const thrust::device_vector<ElemT> &hii,
 		//Zero(HC);
 		thrust::fill(HC.begin(), HC.end(), 0);
 
-		C[0] = W_dev;
+		thrust::copy(policy, W_dev.begin(), W_dev.end(), C[0].begin());
 
 		for (int ib = 0; ib < num_block; ib++) {
 			n++;

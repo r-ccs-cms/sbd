@@ -6,6 +6,7 @@
 #ifdef SBD_THRUST
 #include "sbd/chemistry/gdb/helper_thrust.h"
 #include "sbd/chemistry/gdb/mult_thrust.h"
+#include "sbd/chemistry/gdb/mult_staircase_thrust.h"
 #include "sbd/chemistry/gdb/correlation_thrust.h"
 #else
 #include "sbd/chemistry/gdb/mult.h"
