@@ -244,7 +244,8 @@ spmm_same_spin(const double* __restrict__ C, double* sigma, const int* __restric
                int mode, long long ylo, long long yhi, long long cw0, long long cw1, long long crow0,
                long long ccol0, long long ldc)
 {
-    extern __shared__ double smem[];  // two stages of 64 x LDC doubles
+    extern __shared__ double spmm_same_spin_smem[];
+    double* const smem = spmm_same_spin_smem;  // two stages of 64 x LDC doubles
     const int I = blockIdx.x, ch = blockIdx.y;
     const int tid = threadIdx.x;
     const int row = tid % SBD_FM_TR, half = tid / SBD_FM_TR;
