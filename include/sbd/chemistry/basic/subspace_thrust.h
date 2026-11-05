@@ -89,8 +89,16 @@ struct HostSubspace {
         if (n > 0 && cudaGetDevice(&dev) == cudaSuccess &&
             cudaDeviceGetAttribute(&pageable, cudaDevAttrPageableMemoryAccess, dev) == cudaSuccess &&
             pageable) {
-            if (cudaMemAdvise(p, n * sizeof(T), cudaMemAdviseSetPreferredLocation, cudaCpuDeviceId) != cudaSuccess ||
-                cudaMemAdvise(p, n * sizeof(T), cudaMemAdviseSetAccessedBy, dev) != cudaSuccess)
+#if CUDART_VERSION >= 13000  // CUDA 13 cudaMemAdvise takes a cudaMemLocation
+            cudaMemLocation host{}, gpu{};
+            host.type = cudaMemLocationTypeHost;
+            gpu.type = cudaMemLocationTypeDevice;
+            gpu.id = dev;
+#else
+            const int host = cudaCpuDeviceId, gpu = dev;
+#endif
+            if (cudaMemAdvise(p, n * sizeof(T), cudaMemAdviseSetPreferredLocation, host) != cudaSuccess ||
+                cudaMemAdvise(p, n * sizeof(T), cudaMemAdviseSetAccessedBy, gpu) != cudaSuccess)
                 (void)cudaGetLastError();  // advice is only a hint
         }
 #pragma omp parallel for schedule(static)
