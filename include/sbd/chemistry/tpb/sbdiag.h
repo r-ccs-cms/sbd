@@ -222,15 +222,19 @@ namespace sbd {
 #ifdef USE_OMP_OFFLOAD
       // check orbital count and determinant size : there are limits in omp_offload.h
       size_t detSize = (2*norbs + bit_length - 1) / bit_length;
-      if ( (detSize > SBD_MAX_DETSIZE) && (mpi_rank == 0) ) {
-        std::cout << "determinant size " << detSize << " exceeds the current limit " << SBD_MAX_DETSIZE << std::endl;
-        std::cout << "increase bit_length or increase SBD_MAX_DETSIZE in omp_offload.h ... exiting" << std::endl;
-        MPI_Abort(MPI_COMM_WORLD, 0);
+      if ( detSize > SBD_MAX_DETSIZE ) {
+        if (mpi_rank == mpi_master) {
+          std::cerr << "Error: determinant size " << detSize << " exceeds the current limit " << SBD_MAX_DETSIZE << std::endl;
+          std::cerr << "increase bit_length or increase SBD_MAX_DETSIZE in omp_offload.h ... exiting" << std::endl;
+        }
+        MPI_Abort(comm, 1);
       }
-      if ( (2*norbs > SBD_MAX_SPINORBITALS) && (mpi_rank == 0) ) {
-        std::cout << "the number of spin-orbitals " << 2*norbs << " exceeds the current limit " << SBD_MAX_SPINORBITALS << std::endl;
-        std::cout << "increase SBD_MAX_SPINORBITALS in omp_offload.h ... exiting" << std::endl;
-        MPI_Abort(MPI_COMM_WORLD, 0);
+      if ( 2*norbs > SBD_MAX_SPINORBITALS ) {
+        if (mpi_rank == mpi_master) {
+          std::cerr << "Error: the number of spin-orbitals " << 2*norbs << " exceeds the current limit " << SBD_MAX_SPINORBITALS << std::endl;
+          std::cerr << "increase SBD_MAX_SPINORBITALS in omp_offload.h ... exiting" << std::endl;
+        }
+        MPI_Abort(comm, 1);
       }
 
       // Flatten I1/I2 integrals once and keep on GPU for all tasks
