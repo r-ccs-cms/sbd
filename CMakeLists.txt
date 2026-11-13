@@ -35,6 +35,7 @@ option(SBD_USE_32BIT_PARITY            "Use 32-bit parity"                      
 option(SBD_USE_THRUST_NOSYNC           "Thrust nosync mode"                                OFF)
 option(SBD_SBDIAG_DEBUG                "SBD diagnostic debug output"                       OFF)
 option(SBD_COMPLEX                     "Use complex<double> element type (-D_COMPLEX)"     OFF)
+option(SBD_UHF                         "Unrestricted (UHF) integrals, spin-orbital FCIDUMP (-D_UHF)" OFF)
 
 # ── Compiler diagnostics ─────────────────────────────────────────────────────
 # nvc++ emits noisy warnings for unused variables/functions in template-heavy
@@ -77,6 +78,7 @@ function(sbd_configure_diag target)
 
   target_compile_definitions(${target} PRIVATE
     $<$<BOOL:${SBD_COMPLEX}>:_COMPLEX>
+    $<$<BOOL:${SBD_UHF}>:_UHF>
     $<$<BOOL:${SBD_TRADMODE}>:SBD_TRADMODE>
     $<$<BOOL:${SBD_USE_RANK_DISTRIBUTION}>:SBD_USE_RANK_DISTRIBUTION>
     $<$<BOOL:${SBD_USE_BLOCK_RANK_DISTRIBUTION}>:SBD_USE_BLOCK_RANK_DISTRIBUTION>
