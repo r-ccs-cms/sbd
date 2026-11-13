@@ -6,3 +6,5 @@ set_target_properties(tpb_diag PROPERTIES
 )
 
 sbd_configure_diag(tpb_diag)
+# Unrestricted integrals change only the chemistry FCIDUMP reader (sbd/chemistry/basic), not CAOP.
+target_compile_definitions(tpb_diag PRIVATE $<$<BOOL:${SBD_UHF}>:_UHF>)
