@@ -42,6 +42,8 @@ You can generate the documentation by running the command `doxygen ./doc/Doxyfil
     ```
 
 - Unrestricted (UHF) integrals need a separate build: `-DSBD_UHF=ON` with CMake, or `-D_UHF` added to CCFLAGS with make.
+  The option applies to the TPB and GDB applications only; CAOP Hamiltonians name their spin orbitals directly and need no
+  separate build.
   Such a build reads only SBD's unrestricted FCIDUMP layout, and a default build reads only the restricted one; the layout
   is not detected from the file. In the unrestricted layout `NORB` is still the number of spatial orbitals, and the
   integrals are indexed by interleaved 1-based spin orbitals: alpha of spatial orbital p (1-based) is 2p-1, beta is 2p.
