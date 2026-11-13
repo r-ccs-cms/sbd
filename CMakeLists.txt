@@ -129,6 +129,12 @@ function(sbd_configure_diag target)
   endif()
 endfunction()
 
+# Unrestricted (UHF) integrals: only the chemistry FCIDUMP reader and integral storage
+# (sbd/chemistry/basic) change, so only the TPB and GDB applications call this.
+function(sbd_configure_uhf target)
+  target_compile_definitions(${target} PRIVATE $<$<BOOL:${SBD_UHF}>:_UHF>)
+endfunction()
+
 # CPU tools use MPI/OpenMP even when diagonalization uses a GPU.
 # Each application selects its supported coefficient type separately.
 function(sbd_configure_cpu target)
