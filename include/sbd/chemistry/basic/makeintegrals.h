@@ -17,12 +17,14 @@ namespace sbd {
      (-D_UHF) indexes interleaved spin orbitals, 1 .. 2 NORB (alpha odd, beta even), and conserves
      spin: i, j of one spin and k, l of one spin. A restricted file nearly always has a line that
      mixes the parities of i and j (or of k and l), such as h_21, and such a line has no meaning in
-     the unrestricted layout.
+     the unrestricted layout. A mixed line whose value is zero is allowed: it changes no integral, and
+     such files were read before this check.
   */
   inline void CheckFCIDumpLayout(const FCIDump & fcidump, int L, bool unrestricted) {
     for(const auto & [value, i, j, k, l] : fcidump.integrals) {
       const int m = std::max(std::max(i, j), std::max(k, l));
-      const bool mixed = (i > 0 && j > 0 && i % 2 != j % 2) || (k > 0 && l > 0 && k % 2 != l % 2);
+      const bool mixed = value != 0.0
+        && ((i > 0 && j > 0 && i % 2 != j % 2) || (k > 0 && l > 0 && k % 2 != l % 2));
       const char * why = nullptr;
       if(!unrestricted && m > L)
         why = "orbital index above NORB. It looks unrestricted (SBD's UHF layout): build with -DSBD_UHF=ON (CMake) or -D_UHF.";
