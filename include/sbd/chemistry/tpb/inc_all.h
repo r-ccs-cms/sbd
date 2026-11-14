@@ -9,6 +9,7 @@
 #include "sbd/chemistry/tpb/mult.h"
 #ifdef SBD_THRUST
 #include "sbd/chemistry/tpb/mult_thrust.h"
+#include "sbd/chemistry/tpb/mult_factored_thrust.h"
 #endif
 #include "sbd/chemistry/tpb/davidson.h"
 #include "sbd/chemistry/tpb/lanczos.h"
