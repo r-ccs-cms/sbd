@@ -909,19 +909,31 @@ public:
                 gofs[i] = static_cast<long long>(r) * maxrows_ + (pa[i] - ranges[2 * r]);
         gofs_ = gofs;
 
-        std::vector<double> h1(static_cast<size_t>(L_) * L_);
-        std::vector<double> eri(static_cast<size_t>(L_) * L_ * L_ * L_);
-        for (int p = 0; p < L_; p++)
-            for (int q = 0; q < L_; q++) h1[p * L_ + q] = I1.Value(2 * p, 2 * q);
-        for (int p = 0; p < L_; p++)
-            for (int q = 0; q < L_; q++)
-                for (int r = 0; r < L_; r++)
-                    for (int s = 0; s < L_; s++)
-                        eri[((static_cast<size_t>(p) * L_ + q) * L_ + r) * L_ + s] =
-                            I2.Value(2 * p, 2 * q, 2 * r, 2 * s);
+        // Each term with its own spin block. The accessors take spin-orbital indices (2p alpha,
+        // 2p+1 beta) in every build: with restricted integrals all blocks equal the alpha one, so
+        // nothing changes there, and a -D_UHF build gets its beta and alpha-beta blocks.
+        auto one_body = [&](int spin) {
+            std::vector<double> h(static_cast<size_t>(L_) * L_);
+            for (int p = 0; p < L_; p++)
+                for (int q = 0; q < L_; q++) h[p * L_ + q] = I1.Value(2 * p + spin, 2 * q + spin);
+            return h;
+        };
+        auto two_body = [&](int spin_pq, int spin_rs) {  // (pq|rs), pq of one spin, rs of the other
+            std::vector<double> v(static_cast<size_t>(L_) * L_ * L_ * L_);
+            for (int p = 0; p < L_; p++)
+                for (int q = 0; q < L_; q++)
+                    for (int r = 0; r < L_; r++)
+                        for (int s = 0; s < L_; s++)
+                            v[((static_cast<size_t>(p) * L_ + q) * L_ + r) * L_ + s] =
+                                I2.Value(2 * p + spin_pq, 2 * q + spin_pq, 2 * r + spin_rs, 2 * s + spin_rs);
+            return v;
+        };
+        const std::vector<double> h1_a = one_body(0), h1_b = one_body(1);
+        const std::vector<double> eri_aa = two_body(0, 0), eri_bb = two_body(1, 1);
+        const std::vector<double> eri_ab = two_body(0, 1);  // alpha pq, beta rs: the cross term
 
-        factored::BuildSpinStrings(sa_, L_, h1, eri);
-        factored::BuildSpinStrings(sb_, L_, h1, eri);
+        factored::BuildSpinStrings(sa_, L_, h1_a, eri_aa);
+        factored::BuildSpinStrings(sb_, L_, h1_b, eri_bb);
         factored::BuildSpinTiles(tb_, sb_, 0.0);  // the alpha tiles cover the computed rows (SplitRows)
         tcnt_ = factored::ColumnTilesPerTileRow(sa_);
         int dev = 0, optin = 0;
@@ -931,7 +943,7 @@ public:
 #if SBD_FM_SMEM_LIMIT > 0
         smem_limit = std::min<size_t>(smem_limit, SBD_FM_SMEM_LIMIT);  // to test the segments on a larger GPU
 #endif
-        factored::BuildCrossTables(cross_, sa_, sb_, L_, eri, smem_limit);
+        factored::BuildCrossTables(cross_, sa_, sb_, L_, eri_ab, smem_limit);
 
         // Shared memory of the largest cross-term launch on any rank, so that every rank sets the
         // same limit and the occupancy of each group of segments can be queried for the work estimate.
@@ -981,12 +993,12 @@ public:
         std::vector<double> da_local(da.begin() + a0_, da.begin() + a1_);
         da_ = da_local;
         db_ = db;
-        std::vector<double> Jb(nb_ * L_, 0.0);  // Jb[b, p] = sum over r in b of (pp|rr)
+        std::vector<double> Jb(nb_ * L_, 0.0);  // Jb[b, p] = sum over beta r in b of (pp|rr), p alpha
         for (size_t b = 0; b < nb_; b++)
             for (int p = 0; p < L_; p++)
                 for (int r = 0; r < L_; r++)
                     if ((xb_ext[b] >> r) & 1)
-                        Jb[b * L_ + p] += eri[((static_cast<size_t>(p) * L_ + p) * L_ + r) * L_ + r];
+                        Jb[b * L_ + p] += eri_ab[((static_cast<size_t>(p) * L_ + p) * L_ + r) * L_ + r];
         Jb_ = Jb;
 
         if (P_ > 1) {
