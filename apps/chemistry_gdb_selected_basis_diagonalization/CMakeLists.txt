@@ -6,3 +6,4 @@ set_target_properties(gdb_diag PROPERTIES
 )
 
 sbd_configure_diag(gdb_diag)
+sbd_configure_uhf(gdb_diag)

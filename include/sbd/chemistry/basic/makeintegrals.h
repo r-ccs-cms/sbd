@@ -5,7 +5,40 @@
 #ifndef SBD_CHEMISTRY_BASIC_MAKEINTEGRALS_H
 #define SBD_CHEMISTRY_BASIC_MAKEINTEGRALS_H
 
+#include <algorithm>
+#include <stdexcept>
+#include <string>
+
 namespace sbd {
+
+  /**
+     Rejects an FCIDUMP written in the other layout than this build reads, instead of reading it as
+     the wrong one. A restricted file indexes spatial orbitals, 1 .. NORB. SBD's unrestricted layout
+     (-D_UHF) indexes interleaved spin orbitals, 1 .. 2 NORB (alpha odd, beta even), and conserves
+     spin: i, j of one spin and k, l of one spin. A restricted file nearly always has a line that
+     mixes the parities of i and j (or of k and l), such as h_21, and such a line has no meaning in
+     the unrestricted layout. A mixed line whose value is zero is allowed: it changes no integral, and
+     such files were read before this check.
+  */
+  inline void CheckFCIDumpLayout(const FCIDump & fcidump, int L, bool unrestricted) {
+    for(const auto & [value, i, j, k, l] : fcidump.integrals) {
+      const int m = std::max(std::max(i, j), std::max(k, l));
+      const bool mixed = value != 0.0
+        && ((i > 0 && j > 0 && i % 2 != j % 2) || (k > 0 && l > 0 && k % 2 != l % 2));
+      const char * why = nullptr;
+      if(!unrestricted && m > L)
+        why = "orbital index above NORB. It looks unrestricted (SBD's UHF layout): build with -DSBD_UHF=ON (CMake) or -D_UHF.";
+      else if(unrestricted && m > 2 * L)
+        why = "spin-orbital index above 2 NORB.";
+      else if(unrestricted && mixed)
+        why = "line that mixes alpha and beta spin orbitals, which SBD's UHF layout cannot hold. "
+              "It looks restricted: use a build without SBD_UHF (-D_UHF).";
+      if(why)
+        throw std::runtime_error("FCIDUMP integral line " + std::to_string(i) + " " + std::to_string(j) + " "
+                                 + std::to_string(k) + " " + std::to_string(l) + " (NORB = " + std::to_string(L)
+                                 + "): " + why);
+    }
+  }
 
 #ifdef _UHF
   template <typename ElemT>
@@ -24,6 +57,7 @@ namespace sbd {
 	N = std::atoi(value.c_str());
       }
     }
+    CheckFCIDumpLayout(fcidump, L, true);
 
     I1.norbs = 2 * L;
     I1.store.resize(4*L*L,ElemT(0.0));
@@ -82,6 +116,7 @@ namespace sbd {
 	N = std::atoi(value.c_str());
       }
     }
+    CheckFCIDumpLayout(fcidump, L, true);
 
     I1.norbs = 2 * L;
     I1.store.resize(4*L*L,ElemT(0.0));
@@ -136,6 +171,7 @@ namespace sbd {
 	N = std::atoi(value.c_str());
       }
     }
+    CheckFCIDumpLayout(fcidump, L, false);
 
     I1.norbs = 2 * L;
     I1.store.resize(4*L*L,ElemT(0.0));

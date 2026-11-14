@@ -35,6 +35,7 @@ option(SBD_USE_32BIT_PARITY            "Use 32-bit parity"                      
 option(SBD_USE_THRUST_NOSYNC           "Thrust nosync mode"                                OFF)
 option(SBD_SBDIAG_DEBUG                "SBD diagnostic debug output"                       OFF)
 option(SBD_COMPLEX                     "Use complex<double> element type (-D_COMPLEX)"     OFF)
+option(SBD_UHF                         "TPB and GDB: unrestricted (UHF) spin-orbital FCIDUMP (-D_UHF)" OFF)
 
 # ── Compiler diagnostics ─────────────────────────────────────────────────────
 # nvc++ emits noisy warnings for unused variables/functions in template-heavy
@@ -126,6 +127,12 @@ function(sbd_configure_diag target)
       target_link_options(${target}   PRIVATE -cuda)
     endif()
   endif()
+endfunction()
+
+# Unrestricted (UHF) integrals: only the chemistry FCIDUMP reader and integral storage
+# (sbd/chemistry/basic) change, so only the TPB and GDB applications call this.
+function(sbd_configure_uhf target)
+  target_compile_definitions(${target} PRIVATE $<$<BOOL:${SBD_UHF}>:_UHF>)
 endfunction()
 
 # CPU tools use MPI/OpenMP even when diagonalization uses a GPU.

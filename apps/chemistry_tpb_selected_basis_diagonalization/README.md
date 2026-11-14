@@ -40,6 +40,17 @@ You can generate the documentation by running the command `doxygen ./doc/Doxyfil
     make
     ```
 
+- Unrestricted (UHF) integrals need a separate build: `-DSBD_UHF=ON` with CMake, or `-D_UHF` added to CCFLAGS with make.
+  The option applies to the TPB and GDB applications only; CAOP Hamiltonians name their spin orbitals directly and need no
+  separate build.
+  Such a build reads only SBD's unrestricted FCIDUMP layout, and a default build reads only the restricted one; each
+  stops with an error naming the build to use when the file is in the other layout. In the unrestricted layout `NORB` is still the number of spatial orbitals, and the
+  integrals are indexed by interleaved 1-based spin orbitals: alpha of spatial orbital p (1-based) is 2p-1, beta is 2p.
+  One-body lines are `h i j 0 0`; two-body lines are chemist-notation (ij|kl) with i, j of one spin and k, l of one spin,
+  each unique integral written once (the (alpha alpha|beta beta) block also gives (beta beta|alpha alpha)). The integrals
+  must be real. [`make_uhf_fcidump.py`](https://github.com/Qiskit/sbd-eigensolver-python/blob/main/examples/tools/make_uhf_fcidump.py)
+  writes this layout from PySCF.
+
 ## Command-Line Arguments for Executable
 
 For usage examples, please refer to the `run.sh` script included in this directory. It shows how to run the executable with various command-line options.

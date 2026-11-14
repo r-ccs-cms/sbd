@@ -6,3 +6,4 @@ set_target_properties(tpb_diag PROPERTIES
 )
 
 sbd_configure_diag(tpb_diag)
+sbd_configure_uhf(tpb_diag)
