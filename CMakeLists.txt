@@ -58,6 +58,18 @@ find_package(OpenMP REQUIRED CXX)
 find_package(BLAS REQUIRED)
 find_package(LAPACK REQUIRED)
 
+# ── NCCL (SBD_USE_NCCL): NCCL_HOME, else the NVIDIA HPC SDK's comm_libs for its CUDA ─────────
+if(SBD_USE_NCCL)
+  get_filename_component(_sbd_cuda_version "$ENV{NVHPC_CUDA_HOME}" NAME)
+  set(_sbd_nccl_hints "$ENV{NCCL_HOME}" "$ENV{NVHPC_COMM_LIBS_HOME}/${_sbd_cuda_version}/nccl")
+  find_path(SBD_NCCL_INCLUDE_DIR nccl.h HINTS ${_sbd_nccl_hints} PATH_SUFFIXES include)
+  find_library(SBD_NCCL_LIBRARY nccl HINTS ${_sbd_nccl_hints} PATH_SUFFIXES lib lib64)
+  if(NOT SBD_NCCL_INCLUDE_DIR OR NOT SBD_NCCL_LIBRARY)
+    message(FATAL_ERROR "SBD_USE_NCCL: NCCL not found; set NCCL_HOME")
+  endif()
+  message(STATUS "NCCL: ${SBD_NCCL_LIBRARY}")
+endif()
+
 # ── SBD header-only interface target ─────────────────────────────────────────
 add_library(sbd_headers INTERFACE)
 target_include_directories(sbd_headers INTERFACE
@@ -114,6 +126,10 @@ function(sbd_configure_diag target)
       -cuda
       "-gpu=${SBD_GPU_ARCH},${sbd_memory_flags}"
     )
+    if(SBD_USE_NCCL)
+      target_include_directories(${target} PRIVATE ${SBD_NCCL_INCLUDE_DIR})
+      target_link_libraries(${target} PRIVATE ${SBD_NCCL_LIBRARY})
+    endif()
   elseif(SBD_GPU_BACKEND STREQUAL "omp5")
     target_compile_definitions(${target} PRIVATE SBD_TRADMODE USE_OMP_OFFLOAD)
     target_compile_options(${target} PRIVATE -mp=gpu "-gpu=${SBD_GPU_ARCH}")

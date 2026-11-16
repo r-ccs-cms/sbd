@@ -5,6 +5,11 @@
 #ifndef SBD_CHEMISTRY_SUBSPACE_THRUST_H
 #define SBD_CHEMISTRY_SUBSPACE_THRUST_H
 
+#include <memory>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/system/omp/execution_policy.h>
@@ -16,6 +21,25 @@
 
 namespace sbd
 {
+
+// std::vector allocator whose resize leaves elements uninitialized, so the host subspace vectors
+// (8 GB each at 1e9 determinants) can be zeroed, and their pages first touched, by all OpenMP
+// threads instead of by one thread inside resize (about 135 s for 20 such vectors).
+template <typename T>
+struct default_init_allocator : std::allocator<T> {
+    template <typename U> struct rebind { using other = default_init_allocator<U>; };
+    using std::allocator<T>::allocator;
+    default_init_allocator() = default;
+    template <typename U> default_init_allocator(const default_init_allocator<U>&) noexcept {}
+    template <typename U> void construct(U* p) noexcept(std::is_nothrow_default_constructible<U>::value)
+    {
+        ::new (static_cast<void*>(p)) U;
+    }
+    template <typename U, typename... Args> void construct(U* p, Args&&... args)
+    {
+        ::new (static_cast<void*>(p)) U(std::forward<Args>(args)...);
+    }
+};
 
 // Subspace vectors in GPU memory; element-wise work runs on the GPU.
 struct DeviceSubspace {
@@ -32,12 +56,13 @@ struct DeviceSubspace {
 #endif
     }
     static void check(MPI_Comm) {}
+    template <typename T> static void allocate(vector<T>& v, size_t n) { v.resize(n); }
 };
 
 // Subspace vectors in host memory; element-wise work runs on the CPU with OpenMP.
 // Only the mult input/output is staged through GPU memory (SubspaceMult).
 struct HostSubspace {
-    template <typename T> using vector = std::vector<T>;
+    template <typename T> using vector = std::vector<T, default_init_allocator<T>>;
     static constexpr bool on_device = false;
     static auto policy() { return thrust::omp::par; }
     static void sync() {}
@@ -51,16 +76,36 @@ struct HostSubspace {
             MPI_Abort(comm, 1);
         }
     }
+    // Zero-filled like resize, but by all threads (parallel first touch). Where the GPU can access
+    // pageable memory (GH200), the pages are also told to stay in CPU memory: otherwise each GPU
+    // access (the staging copies) migrates them toward the GPU and the next OpenMP pass runs over
+    // NVLink-C2C. Measured on 8 GB vectors, cold and alternating CPU and GPU access: staging copy in
+    // 1.25 -> 0.089 s, out 0.39 -> 0.061 s, an OpenMP axpy after it 0.253 -> 0.064 s.
+    template <typename T> static void allocate(vector<T>& v, size_t n)
+    {
+        v.resize(n);
+        T* p = v.data();
+        int dev = 0, pageable = 0;
+        if (n > 0 && cudaGetDevice(&dev) == cudaSuccess &&
+            cudaDeviceGetAttribute(&pageable, cudaDevAttrPageableMemoryAccess, dev) == cudaSuccess &&
+            pageable) {
+            if (cudaMemAdvise(p, n * sizeof(T), cudaMemAdviseSetPreferredLocation, cudaCpuDeviceId) != cudaSuccess ||
+                cudaMemAdvise(p, n * sizeof(T), cudaMemAdviseSetAccessedBy, dev) != cudaSuccess)
+                (void)cudaGetLastError();  // advice is only a hint
+        }
+#pragma omp parallel for schedule(static)
+        for (size_t i = 0; i < n; i++) p[i] = T(0);
+    }
 };
 
 template <typename T>
 inline T* raw_ptr(thrust::device_vector<T>& v) { return thrust::raw_pointer_cast(v.data()); }
-template <typename T>
-inline T* raw_ptr(std::vector<T>& v) { return v.data(); }
+template <typename T, typename Alloc>
+inline T* raw_ptr(std::vector<T, Alloc>& v) { return v.data(); }
 
 // Host counterpart of the device Normalize(X, res, comm, comm_size).
-template <typename ElemT, typename RealT>
-void Normalize(std::vector<ElemT>& X, RealT& res, MPI_Comm comm, int /*comm_size*/)
+template <typename ElemT, typename RealT, typename Alloc>
+void Normalize(std::vector<ElemT, Alloc>& X, RealT& res, MPI_Comm comm, int /*comm_size*/)
 {
     SBD_NVTX_RANGE_COLOR("Normalize", __LINE__);
     Normalize(X, res, comm);
@@ -91,6 +136,7 @@ public:
 
 template <typename ElemT>
 class SubspaceMult<HostSubspace, ElemT> {
+    using Vector = HostSubspace::vector<ElemT>;
     MultBase<ElemT>& mult_;
     const thrust::device_vector<ElemT>& hii_;
     thrust::device_vector<ElemT> C_dev_;
@@ -98,22 +144,23 @@ class SubspaceMult<HostSubspace, ElemT> {
 public:
     SubspaceMult(MultBase<ElemT>& mult, const thrust::device_vector<ElemT>& hii, size_t n)
         : mult_(mult), hii_(hii), C_dev_(n), HC_dev_(n) {}
-    void zero(std::vector<ElemT>& C, std::vector<ElemT>& HC) {
+    void zero(Vector& C, Vector& HC) {
         thrust::fill(HC_dev_.begin(), HC_dev_.end(), 0);
         run(C, HC);
     }
-    void add(std::vector<ElemT>& C, std::vector<ElemT>& HC) {
-        thrust::copy(HC.begin(), HC.end(), HC_dev_.begin());
+    void add(Vector& C, Vector& HC) {
+        cudaMemcpy(raw_ptr(HC_dev_), HC.data(), HC.size() * sizeof(ElemT), cudaMemcpyDefault);
         run(C, HC);
     }
 private:
-    void run(std::vector<ElemT>& C, std::vector<ElemT>& HC) {
-        thrust::copy(C.begin(), C.end(), C_dev_.begin());
+    void run(Vector& C, Vector& HC) {
+        // cudaMemcpy, not thrust::copy: thrust's host <-> device path ran at ~31 GB/s on 8 GB vectors
+        cudaMemcpy(raw_ptr(C_dev_), C.data(), C.size() * sizeof(ElemT), cudaMemcpyDefault);
         {
             SBD_NVTX_RANGE_COLOR("mult.run", __LINE__);
             mult_.run(hii_, C_dev_, HC_dev_);
         }
-        thrust::copy(HC_dev_.begin(), HC_dev_.end(), HC.begin());
+        cudaMemcpy(HC.data(), raw_ptr(HC_dev_), HC.size() * sizeof(ElemT), cudaMemcpyDefault);
     }
 };
 

@@ -137,6 +137,21 @@ Below is an explanation of each command-line option.
   memory used by the subspace no longer grows with `--block`. Operations on the
   subspace vectors run on the CPU with OpenMP; the program aborts if
   `OMP_NUM_THREADS` is 1. Energies agree with the default to within rounding.
+- `--factored_mult <int>`:
+  GPU (Thrust) builds only, with `--method 0`. If set to 1, the Hamiltonian is applied to the wavefunction
+  through its factorization over the alpha and beta strings instead of element by element (default: 0).
+  The strings are ranked by how many determinants contain them; for heat-bath and similar lists, the
+  determinants then fill a "staircase" of whole string products (each alpha string paired with a prefix of
+  the ranked beta strings), and the multiplication on it uses sparse same-spin products and dense
+  tensor-core matrix products, as `--factored_mult` in the TPB app. Determinants outside the staircase
+  are handled element by element. The setup prints how much of the list the staircase holds; the speedup
+  falls as that share drops.
+  Requirements: real coefficients, at most 64 orbitals, fewer than 2^19 beta strings. Every rank builds
+  the staircase from the whole list and gathers the whole wavefunction for each multiplication; several ranks need GPU-aware MPI (`SBD_NON_CUDA_AWARE_MPI=OFF`, and `MPICH_GPU_SUPPORT_ENABLED=1` on Cray MPICH).
+  `--rdm 1` still uses the default multiplication for the density matrices.
+- `--factored_mult_check <int>`:
+  With `--factored_mult 1`: if set to 1, compare the factored multiplication with the default one on a
+  random vector before the eigensolver starts, and print the relative differences (expect about 1e-15).
 
 ### Distribution trade-offs
 

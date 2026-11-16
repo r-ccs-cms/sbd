@@ -53,6 +53,13 @@ namespace sbd {
 	  bool thrust_collapse_loops = true;
 	  bool cpu_subspace = false;
 #endif
+	  // --factored_mult 1: H·C from string factors (mult_factored_thrust.h; Thrust builds only);
+	  // --factored_mult_check 1 compares it with the method 0 multiplication first;
+	  // --factored_passes Q brings in 1/Q of the input vector at a time (memory per GPU ~2N/Q);
+	  // 0 (the default) takes the smallest Q from 2 that fits in GPU memory
+	  int factored_mult = 0;
+	  int factored_mult_check = 0;
+	  int factored_passes = 0;
 	};
 
     SBD generate_sbd_data(int argc, char *argv[]) {
@@ -135,7 +142,22 @@ namespace sbd {
 	  i++;
 	}
 #endif
+	if( std::string(argv[i]) == "--factored_mult" ) {
+	  sbd_data.factored_mult = std::atoi(argv[++i]);
+	}
+	if( std::string(argv[i]) == "--factored_mult_check" ) {
+	  sbd_data.factored_mult_check = std::atoi(argv[++i]);
+	}
+	if( std::string(argv[i]) == "--factored_passes" ) {
+	  sbd_data.factored_passes = std::atoi(argv[++i]);
+	}
       }
+#ifndef SBD_THRUST
+      // parsed in every build so that it is refused here rather than silently ignored
+      if( sbd_data.factored_mult != 0 ) {
+	throw std::invalid_argument("--factored_mult 1 needs a Thrust (CUDA) build of sbd");
+      }
+#endif
       return sbd_data;
     }
 
@@ -194,6 +216,8 @@ namespace sbd {
 #ifdef SBD_THRUST
 	  method = method & 1;
 #endif
+      // --factored_mult replaces both multiplications, so --method only selects Davidson or Lanczos
+      if( sbd_data.factored_mult != 0 ) method = sbd_data.method & 2;
 	  int max_it = sbd_data.max_it;
       int max_nb = sbd_data.max_nb;
       double eps = sbd_data.eps;
@@ -284,13 +308,21 @@ namespace sbd {
 			    h_comm_size,adet_comm_size,bdet_comm_size,task_comm_size,
 			    h_comm,b_comm,t_comm,a_comm);
 
+      // The factored multiplication reads only the rank's ranges; the excitation lists are for
+      // the method 0 multiplication, which --factored_mult_check and --rdm 1 still use.
+      const bool helper_ranges_only = sbd_data.factored_mult != 0 && sbd_data.factored_mult_check == 0
+	&& do_rdm == 0;
       auto time_start_help = std::chrono::high_resolution_clock::now();
-      sbd::MakeHelpers(adet,bdet,bit_length,L,helper,
-		       h_comm,b_comm,t_comm,
-		       adet_comm_size,bdet_comm_size);
-      sbd::RemakeHelpers(adet,bdet,bit_length,L,helper,
+      if( helper_ranges_only ) {
+	sbd::MakeHelperRanges(adet,bdet,helper,b_comm,adet_comm_size,bdet_comm_size);
+      } else {
+	sbd::MakeHelpers(adet,bdet,bit_length,L,helper,
 			 h_comm,b_comm,t_comm,
 			 adet_comm_size,bdet_comm_size);
+	sbd::RemakeHelpers(adet,bdet,bit_length,L,helper,
+			   h_comm,b_comm,t_comm,
+			   adet_comm_size,bdet_comm_size);
+      }
       auto time_end_help = std::chrono::high_resolution_clock::now();
       auto elapsed_help_count = std::chrono::duration_cast<std::chrono::microseconds>(time_end_help-time_start_help).count();
       double elapsed_help = 0.000001 * elapsed_help_count;
@@ -404,6 +436,21 @@ namespace sbd {
 #ifdef SBD_THRUST
 	// multiplyer class for TPB on Thrust
 	MultTPBThrust<double> device_mult;
+	bool device_mult_ready = false;  // the factored path initializes it only when it is needed
+	auto init_device_mult = [&]() {
+	    if( device_mult_ready ) return;
+	    SBD_NVTX_RANGE_COLOR("device_mult.Init", __LINE__);
+	    device_mult.Init(adet, bdet, bit_length, static_cast<size_t>(L),
+	                     adet_comm_size,bdet_comm_size, helper, I0, I1, I2,
+	                     h_comm,b_comm,t_comm,a_comm,
+#ifdef SBD_USE_NCCL
+	                     h_nccl_comm, b_nccl_comm, t_nccl_comm, a_nccl_comm,
+#endif
+	                     sbd_data.use_precalculated_dets, sbd_data.max_memory_gb_for_determinants, sbd_data.thrust_collapse_loops);
+	    device_mult_ready = true;
+	};
+	MultTPBFactored<double> factored_mult;
+	const bool use_factored = sbd_data.factored_mult != 0;
 #endif
 
       /**
@@ -418,16 +465,17 @@ namespace sbd {
 	auto time_start_diag = std::chrono::high_resolution_clock::now();
 #ifdef SBD_THRUST
 	auto time_start_mult_init = std::chrono::high_resolution_clock::now();
-        {
-            SBD_NVTX_RANGE_COLOR("device_mult.Init", __LINE__);
-            device_mult.Init(adet, bdet, bit_length, static_cast<size_t>(L),
-                             adet_comm_size,bdet_comm_size, helper, I0, I1, I2,
-                             h_comm,b_comm,t_comm,a_comm,
-#ifdef SBD_USE_NCCL
-                             h_nccl_comm, b_nccl_comm, t_nccl_comm, a_nccl_comm,
-#endif
-                             sbd_data.use_precalculated_dets, sbd_data.max_memory_gb_for_determinants, sbd_data.thrust_collapse_loops);
-        }
+	if( use_factored ) {
+	    SBD_NVTX_RANGE_COLOR("factored_mult.Init", __LINE__);
+	    factored_mult.Init(adet, bdet, bit_length, static_cast<size_t>(L), helper, I0, I1, I2,
+	                       h_comm, b_comm, t_comm, a_comm, sbd_data.factored_passes,
+	                       // allocated later: the eigensolver's vectors on the GPU and the diagonal
+	                       sizeof(double) * (helper[0].braAlphaEnd - helper[0].braAlphaStart) * bdet.size()
+	                       * static_cast<size_t>(sbd_data.cpu_subspace ? 5 : 2 * max_nb + 5));
+	}
+	if( !use_factored || sbd_data.factored_mult_check ) {
+	    init_device_mult();
+	}
 	auto time_end_mult_init = std::chrono::high_resolution_clock::now();
 	auto elapsed_mult_init_count = std::chrono::duration_cast<std::chrono::microseconds>(time_end_mult_init-time_start_mult_init).count();
 	double elapsed_mult_init = 1.0e-6 * elapsed_mult_init_count;
@@ -439,8 +487,22 @@ namespace sbd {
 	thrust::device_vector<double> hii;
         {
             SBD_NVTX_RANGE_COLOR("device_mult.makeQChamDiagTerms", __LINE__);
-            device_mult.makeQChamDiagTerms(hii);
+            if( use_factored ) factored_mult.makeQChamDiagTerms(hii);
+            else device_mult.makeQChamDiagTerms(hii);
         }
+	MultBase<double>& thrust_mult = use_factored ? static_cast<MultBase<double>&>(factored_mult)
+	                                             : static_cast<MultBase<double>&>(device_mult);
+	if( use_factored && sbd_data.factored_mult_check ) {
+	    thrust::device_vector<double> hii_ref;
+	    device_mult.makeQChamDiagTerms(hii_ref);
+	    double diag_diff = 0.0, mult_diff = 0.0;
+	    factored_mult.CompareWithReference(device_mult, hii, hii_ref, diag_diff, mult_diff);
+	    if( mpi_rank == 0 ) {
+	      std::cout.precision(3);
+	      std::cout << " factored_mult check against method 0: diagonal rel diff " << diag_diff
+	                << ", H*x rel diff " << mult_diff << std::endl;
+	    }
+	}
 #else
 	auto time_start_qcham = std::chrono::high_resolution_clock::now();
 	std::vector<double> hii;
@@ -459,11 +521,11 @@ namespace sbd {
 #ifdef SBD_THRUST
 	if( method == 0 ) {
             SBD_NVTX_RANGE_COLOR("Davidson", __LINE__);
-            sbd::Davidson(hii, W, device_mult,
+            sbd::Davidson(hii, W, thrust_mult,
                           max_it,max_nb,eps,max_time,sbd_data.cpu_subspace);
 	} else {
             SBD_NVTX_RANGE_COLOR("Lanczos", __LINE__);
-            sbd::Lanczos(hii, W, device_mult,
+            sbd::Lanczos(hii, W, thrust_mult,
                          max_it,max_nb,eps,sbd_data.cpu_subspace);
 	}
 #else
@@ -513,7 +575,7 @@ namespace sbd {
 
         {
             SBD_NVTX_RANGE_COLOR("device_mult.run", __LINE__);
-            device_mult.run(hii, W_dev, C_dev);
+            thrust_mult.run(hii, W_dev, C_dev);
         }
 
 	thrust::copy_n(C_dev.begin(), C_dev.size(), C.begin());
@@ -551,13 +613,7 @@ namespace sbd {
 
 #ifdef SBD_THRUST
 	auto time_start_mult_init = std::chrono::high_resolution_clock::now();
-	device_mult.Init(adet, bdet, bit_length, static_cast<size_t>(L),
-                         adet_comm_size,bdet_comm_size, helper, I0, I1, I2,
-                         h_comm, b_comm, t_comm, a_comm,
-#ifdef SBD_USE_NCCL
-                         h_nccl_comm, b_nccl_comm, t_nccl_comm, a_nccl_comm,
-#endif
-                         sbd_data.use_precalculated_dets, sbd_data.max_memory_gb_for_determinants, sbd_data.thrust_collapse_loops);
+	init_device_mult();
 	auto time_end_mult_init = std::chrono::high_resolution_clock::now();
 	auto elapsed_mult_init_count = std::chrono::duration_cast<std::chrono::microseconds>(time_end_mult_init-time_start_mult_init).count();
 	double elapsed_mult_init = 1.0e-6 * elapsed_mult_init_count;
@@ -724,6 +780,7 @@ namespace sbd {
 #ifdef SBD_THRUST
         {
             SBD_NVTX_RANGE_COLOR("device_mult.correlation", __LINE__);
+            init_device_mult();  // not yet initialized on the factored path
             device_mult.correlation(W,
                                     one_p_rdm,
                                     two_p_rdm);

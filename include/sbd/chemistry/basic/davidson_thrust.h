@@ -82,13 +82,14 @@ void GetTotalD(const thrust::device_vector<ElemT>& hii,
 
 template <typename ElemT>
 void GetTotalD(const thrust::device_vector<ElemT>& hii,
-               std::vector<ElemT>& dii, MPI_Comm h_comm)
+               HostSubspace::vector<ElemT>& dii, MPI_Comm h_comm)
 {
     SBD_NVTX_RANGE_COLOR("GetTotalD", __LINE__);
     int h_size; MPI_Comm_size(h_comm, &h_size);
-    dii.resize(hii.size());
+    HostSubspace::allocate(dii, hii.size());  // pages first touched by all threads, then one copy
     if (h_size == 1) {
-        thrust::copy(hii.begin(), hii.end(), dii.begin());
+        cudaMemcpy(dii.data(), thrust::raw_pointer_cast(hii.data()), hii.size() * sizeof(ElemT),
+                   cudaMemcpyDeviceToHost);
     } else {
         std::vector<ElemT> hii_host(hii.size());
         thrust::copy(hii.begin(), hii.end(), hii_host.begin());
@@ -132,15 +133,25 @@ void DavidsonImpl(const thrust::device_vector<ElemT> &hii,
     Space::check(mult.b_comm());
     RealT eps_reg = 1.0e-12;
 
+    // Allocated in order of use, so that with the subspace in host memory the vectors touched most
+    // often get the local memory first: at 1e9 determinants the ~23 vectors of 8 GB exceed a GH200
+    // superchip's 120 GB, and the later ones land on a neighbour's memory at half the bandwidth or
+    // less. W, R and the diagonal are read or written every step, each C several times per step
+    // (update of W, Gram-Schmidt, projection), each HC about once (update of R).
+    Vector W_dev;
+    Space::allocate(W_dev, W.size());
+    thrust::copy_n(W.begin(), W.size(), W_dev.begin());
+    Vector R;
+    Space::allocate(R, W.size());
+    Vector dii;
+    GetTotalD(hii, dii, mult.h_comm());
     std::vector<Vector> C(num_block);
     std::vector<Vector> HC(num_block);
     for (int i = 0; i < num_block; i++) {
         SBD_NVTX_RANGE_COLOR("for (int i ...", __LINE__ + i);
-        C[i].resize(W.size());
-        HC[i].resize(W.size());
+        Space::allocate(C[i], W.size());
     }
-    Vector R(W.size());
-    Vector dii;
+    for (int i = 0; i < num_block; i++) Space::allocate(HC[i], W.size());
     SubspaceMult<Space, ElemT> smult(mult, hii, W.size());
     int mpi_rank_h;
     MPI_Comm_rank(mult.h_comm(), &mpi_rank_h);
@@ -168,7 +179,6 @@ void DavidsonImpl(const thrust::device_vector<ElemT> &hii,
     MPI_Datatype DataE = GetMpiType<RealT>::MpiT;
     MPI_Datatype DataH = GetMpiType<ElemT>::MpiT;
 
-    GetTotalD(hii, dii, mult.h_comm());
 
 #ifdef SBD_DEBUG_DAVIDSON
     std::cout << " diagonal term at mpi process (h,b,t) = ("
@@ -188,13 +198,9 @@ void DavidsonImpl(const thrust::device_vector<ElemT> &hii,
 
     auto policy = Space::policy();
 
-    // copyin W
-    Vector W_dev(W.size());
-    thrust::copy_n(W.begin(), W.size(), W_dev.begin());
-
     for (int it = 0; it < max_iteration; it++) {
         SBD_NVTX_RANGE_COLOR("for (int it ...", __LINE__ + it);
-        C[0] = W_dev;
+        thrust::copy(policy, W_dev.begin(), W_dev.end(), C[0].begin());
 
         for (int ib = 0; ib < nb; ib++) {
             SBD_NVTX_RANGE_COLOR("for (int ib ...", __LINE__ + ib);

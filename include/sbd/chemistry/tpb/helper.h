@@ -872,6 +872,34 @@ void FreeHelpers(std::vector<TaskHelpers> &helper) {
 
   }
 
+  /**
+     Only this rank's bra and ket ranges of the first task, with no excitation lists, for callers
+     that need nothing else (the factored multiplication with task_comm_size 1).
+   */
+  void MakeHelperRanges(const det_vector<size_t, det_kind::half> & adets,
+			const det_vector<size_t, det_kind::half> & bdets,
+			std::vector<TaskHelpers> & helper,
+			MPI_Comm b_comm,
+			size_t adet_comm_size,
+			size_t bdet_comm_size) {
+    int mpi_rank_b; MPI_Comm_rank(b_comm,&mpi_rank_b);
+    helper.assign(1,TaskHelpers{});  // value-initialized: the length pointers are null
+    TaskHelpers & h = helper[0];
+    h.braAlphaStart = 0;
+    h.braAlphaEnd = adets.size();
+    h.braBetaStart = 0;
+    h.braBetaEnd = bdets.size();
+    get_mpi_range(adet_comm_size, mpi_rank_b / bdet_comm_size, h.braAlphaStart, h.braAlphaEnd);
+    get_mpi_range(bdet_comm_size, mpi_rank_b % bdet_comm_size, h.braBetaStart, h.braBetaEnd);
+    h.ketAlphaStart = h.braAlphaStart;
+    h.ketAlphaEnd = h.braAlphaEnd;
+    h.ketBetaStart = h.braBetaStart;
+    h.ketBetaEnd = h.braBetaEnd;
+    h.taskType = 2;
+    h.adetShift = 0;
+    h.bdetShift = 0;
+  }
+
 std::vector<size_t> TaskCostSize(const std::vector<TaskHelpers> &helper,
                                  MPI_Comm h_comm, MPI_Comm b_comm,
                                  MPI_Comm t_comm) {

@@ -536,8 +536,8 @@ namespace sbd {
 #endif
   }
 #else
-  template <typename ElemT>
-  void MpiAllreduce(std::vector<ElemT> & A, MPI_Op op, MPI_Comm comm) {
+  template <typename ElemT, typename Alloc>
+  void MpiAllreduce(std::vector<ElemT, Alloc> & A, MPI_Op op, MPI_Comm comm) {
     MPI_Datatype DataT;
     if constexpr (std::is_same_v<ElemT,size_t>) {
       DataT = SBD_MPI_SIZE_T;
