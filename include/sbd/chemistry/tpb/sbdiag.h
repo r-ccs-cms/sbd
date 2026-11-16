@@ -498,9 +498,10 @@ namespace sbd {
 	    double diag_diff = 0.0, mult_diff = 0.0;
 	    factored_mult.CompareWithReference(device_mult, hii, hii_ref, diag_diff, mult_diff);
 	    if( mpi_rank == 0 ) {
-	      std::cout.precision(3);
+	      const std::streamsize prec = std::cout.precision(3);
 	      std::cout << " factored_mult check against method 0: diagonal rel diff " << diag_diff
 	                << ", H*x rel diff " << mult_diff << std::endl;
+	      std::cout.precision(prec);  // the Davidson lines that follow print at full precision
 	    }
 	}
 #else
