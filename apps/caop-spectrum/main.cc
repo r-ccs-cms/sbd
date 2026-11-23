@@ -132,6 +132,22 @@ template<class ElemT> void run(const cli::Options& o,int rank) {
 int main(int argc,char** argv) {
   int provided=0;MPI_Init_thread(&argc,&argv,MPI_THREAD_FUNNELED,&provided);
   int rank=0;MPI_Comm_rank(MPI_COMM_WORLD,&rank);
+
+#ifdef SBD_THRUST
+  // one GPU per rank, as the TPB app does (a rank that sees a single GPU keeps device 0)
+  {
+    int numDevices = 0, myDevice = 0;
+#ifdef __CUDACC__
+    cudaGetDeviceCount(&numDevices);
+    myDevice = numDevices > 0 ? rank % numDevices : 0;
+    cudaSetDevice(myDevice);
+#else
+    hipGetDeviceCount(&numDevices);
+    myDevice = numDevices > 0 ? rank % numDevices : 0;
+    hipSetDevice(myDevice);
+#endif
+  }
+#endif
   try {
     if(provided<MPI_THREAD_FUNNELED) throw std::runtime_error("MPI_THREAD_FUNNELED required");
     omp_set_dynamic(0); // Stored COO slots require a fixed construction team.
