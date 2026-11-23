@@ -15,6 +15,7 @@ Included by mult.h when SBD_THRUST is defined. Same call signature as the CPU ve
 #include <algorithm>
 #include <vector>
 #include <cstring>
+#include <cstdint>
 #include <stdexcept>
 
 #include "sbd/caop/basic/generalop.h"
@@ -41,6 +42,10 @@ static_assert(SBD_CAOP_MULT_BLOCK_SIZE % 32 == 0,
               "SBD_CAOP_MULT_BLOCK_SIZE must be a multiple of 32 (full warp)");
 static_assert(32 % SBD_CAOP_MULT_SUBWARP_SIZE == 0,
               "SBD_CAOP_MULT_SUBWARP_SIZE must divide 32 (must be 1, 2, 4, 8, 16, or 32)");
+
+// Population count of a warp ballot: 32-bit lane masks on NVIDIA, 64-bit on AMD (64-lane wavefronts).
+__device__ __forceinline__ int caop_popc_mask(unsigned x) { return __popc(x); }
+__device__ __forceinline__ int caop_popc_mask(unsigned long long x) { return __popcll(x); }
 
 // ============================================================
 // CaopBufferSlider<ElemT>: CPU-staging MPI slider for twk.
@@ -170,10 +175,20 @@ struct CaopMultKernel {
         int*    my_n   = s_n   + grp * BPGP;
 
         // Per-subwarp ballot mask (handles SW < 32 with multiple groups per warp)
+#if defined(__HIP_PLATFORM_AMD__)
+        // AMD: 64-lane wavefronts, so lane indices run to 63 and lane masks are 64-bit.
+        using lane_mask_t = unsigned long long;
+        const unsigned lane_in_warp = (unsigned)threadIdx.x % 64u;
+        const unsigned grp_in_warp  = lane_in_warp / (unsigned)SW;
+        const lane_mask_t sw_lanes  = (SW == 64) ? ~0ull : ((1ull << SW) - 1ull);
+        const lane_mask_t sw_mask   = sw_lanes << (grp_in_warp * SW);
+#else
+        using lane_mask_t = unsigned;
         const unsigned lane_in_warp = (unsigned)threadIdx.x % 32u;
         const unsigned grp_in_warp  = lane_in_warp / (unsigned)SW;
         const unsigned sw_lanes     = (SW == 32) ? 0xFFFFFFFFu : ((1u << SW) - 1u);
         const unsigned sw_mask      = sw_lanes << (grp_in_warp * SW);
+#endif
 
         // Cooperative bra load (handles elem_size > SW)
         for (int w = lane; w < elem_size; w += SW)
@@ -195,12 +210,12 @@ struct CaopMultKernel {
                         survives = false;
                 }
             }
-            unsigned ballot = __ballot_sync(sw_mask, survives);
+            lane_mask_t ballot = __ballot_sync(sw_mask, survives);
             if (survives) {
-                int rank = __popc(ballot & ((1u << lane_in_warp) - 1u));
+                int rank = caop_popc_mask(ballot & ((lane_mask_t(1) << lane_in_warp) - 1));
                 my_n[s_count + rank] = n;
             }
-            s_count += __popc(ballot);
+            s_count += caop_popc_mask(ballot);
 
             if (s_count >= SW) {
                 __syncwarp(sw_mask);
@@ -311,14 +326,32 @@ void caop_mult_kernel_fn(size_t n_threads, F f) {
     if (i < n_threads) f(i);
 }
 
+#if defined(__HIP_PLATFORM_AMD__)
+template <typename F>
+__global__ __launch_bounds__(F::BlockSize, F::MinBlocksPerSM)
+void caop_mult_kernel_fn_at(size_t n_threads, F f, size_t offset) {
+    size_t i = offset + (size_t)blockIdx.x * F::BlockSize + threadIdx.x;
+    if (i < n_threads) f(i);
+}
+#endif
+
 template <typename F>
 inline void launch_caop_mult(size_t n_bras, F f, size_t smem_bytes, cudaStream_t stream) {
     if (n_bras == 0) return;
     constexpr int BS = F::BlockSize;
     constexpr int SW = F::SUBWARP;
     size_t n_threads = n_bras * SW;
+#if defined(__HIP_PLATFORM_AMD__)
+    // HIP limits grid x block per dimension to below 2^32 threads: launch in chunks.
+    constexpr size_t MAX_THREADS = ((size_t)UINT32_MAX / BS) * BS;
+    for (size_t offset = 0; offset < n_threads; offset += MAX_THREADS) {
+        const size_t this_n = std::min(n_threads - offset, MAX_THREADS);
+        caop_mult_kernel_fn_at<F><<<(this_n + BS - 1) / BS, BS, smem_bytes, stream>>>(n_threads, f, offset);
+    }
+#else
     size_t grid = (n_threads + BS - 1) / BS;
     caop_mult_kernel_fn<F><<<grid, BS, smem_bytes, stream>>>(n_threads, f);
+#endif
 }
 
 // ============================================================
