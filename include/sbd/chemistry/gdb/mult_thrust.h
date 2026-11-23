@@ -95,6 +95,17 @@ void mult_for_each_n_kernel(size_t n, Functor functor)
     if (i < n) functor(i);
 }
 
+#if defined(__HIP_PLATFORM_AMD__)
+// The same, for a chunk of the threads starting at offset (see launch_mult_for_each_n).
+template <typename Functor>
+__global__ __launch_bounds__(Functor::BlockSize, Functor::MinBlocksPerSM)
+void mult_for_each_n_kernel_at(size_t n, Functor functor, size_t offset)
+{
+    size_t i = offset + static_cast<size_t>(blockIdx.x) * Functor::BlockSize + threadIdx.x;
+    if (i < n) functor(i);
+}
+#endif
+
 template <typename Functor>
 inline void launch_mult_for_each_n(size_t n_subwarps, Functor functor,
                                     cudaStream_t stream = 0)
@@ -103,8 +114,17 @@ inline void launch_mult_for_each_n(size_t n_subwarps, Functor functor,
     constexpr int BS = Functor::BlockSize;
     constexpr int SW = Functor::SubwarpSize;
     const size_t n_threads = n_subwarps * SW;
+#if defined(__HIP_PLATFORM_AMD__)
+    // HIP limits grid x block per dimension to below 2^32 work-items: launch in chunks of at most that many.
+    constexpr size_t MAX_THREADS = ((size_t)UINT32_MAX / BS) * BS;
+    for (size_t offset = 0; offset < n_threads; offset += MAX_THREADS) {
+        const size_t this_n = std::min(n_threads - offset, MAX_THREADS);
+        mult_for_each_n_kernel_at<Functor><<<(this_n + BS - 1) / BS, BS, 0, stream>>>(n_threads, functor, offset);
+    }
+#else
     const size_t grid = (n_threads + BS - 1) / BS;
     mult_for_each_n_kernel<Functor><<<grid, BS, 0, stream>>>(n_threads, functor);
+#endif
 }
 
 template <typename ElemT>
