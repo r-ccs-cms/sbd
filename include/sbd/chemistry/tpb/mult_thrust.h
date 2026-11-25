@@ -115,7 +115,12 @@ inline void launch_tpb_for_each_n(size_t n, Functor functor,
     // When n > INT_MAX*BS, split into sequential per-chunk kernel calls so each
     // launch fits within CUDA's 2^31-1 grid-x limit while keeping fully
     // sequential (non-strided) memory access within each chunk.
+#if defined(__HIP_PLATFORM_AMD__)
+    // HIP limits the total work-items per grid dimension (grid x block) to below 2^32, not just the block count.
+    constexpr size_t MAX_GRID = (size_t)UINT32_MAX / BS;
+#else
     constexpr size_t MAX_GRID = (size_t)INT_MAX;
+#endif
     for (size_t offset = 0; offset < n; offset += MAX_GRID * BS) {
         const size_t this_n = std::min(n - offset, MAX_GRID * BS);
         const size_t grid = (this_n + BS - 1) / BS;

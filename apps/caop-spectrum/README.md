@@ -54,6 +54,10 @@ overrides. With NVHPC, the shared flags include `-std=c++17 -O3 -mp -cuda
 -DSBD_NON_CUDA_AWARE_MPI`; pass the same NVPL LP64 sequential libraries via
 `SYSLIB`. Set the architecture to match the target GPU.
 
+On AMD GPUs, build with `make -f Makefile.hip` and `Configuration.hip`, as for `caop_diag` in
+`../caop_selected_basis_diagonalization`: `hipcc` (via the MPI wrapper) against rocThrust and hipCUB, with
+`hipshim/` mapping the CUDA, Thrust and CUB names. The same `--hamiltonian-mode on-the-fly` selects the GPU `mult`.
+
 CAOP defaults to `SBD_CAOP_THRUST_MEMORY_MODE=separate`, applying
 `mem:separate,nointerceptdeallocations` to both `caop-spectrum` and `caop_diag`.
 GDB/TPB retain their existing settings. For comparisons, select

@@ -11,6 +11,12 @@ Sample code for computing the ground state of a Hamiltonian written by the creat
     make
     ```
 
+- AMD GPUs (Thrust backend through HIP): `make -f Makefile.hip` with `Configuration.hip`; uncomment `-D_COMPLEX`
+  there for complex coefficients. The sources are compiled with `hipcc` (via the MPI wrapper, e.g.
+  `export MPICH_CXX=hipcc`) against rocThrust and hipCUB; `hipshim/` at the top of the repository maps SBD's CUDA,
+  Thrust and CUB names onto them. Set `GPU_ARCH` (`gfx90a` for MI200, `gfx942` for MI300). Use a GPU-aware MPI for
+  several ranks, and run one MPI rank per GPU (GCD). As on NVIDIA, only `--method 0` and `2` use the GPU.
+
 ## Command-Line Arguments for Executable
 
 For usage examples, please refer to the `run.sh` script included in this directory. It shows how to run the executable with various command-line options.

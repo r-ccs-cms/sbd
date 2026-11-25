@@ -87,6 +87,10 @@ static_assert(SBD_MULT_MIN_BLOCKS_PER_SM >= 1 &&
 // (`BUF_TOTAL = 2 * SBD_MULT_BLOCK_SIZE`) matches the actual block size.
 // BlockSize and MinBlocksPerSM are read from the Functor class (static constexpr
 // members defined in MultKernelBase); n is the number of subwarps, not threads.
+// Population count of a warp ballot: 32-bit lane masks on NVIDIA, 64-bit on AMD (64-lane wavefronts).
+__device__ __forceinline__ int sbd_popc_mask(unsigned x) { return __popc(x); }
+__device__ __forceinline__ int sbd_popc_mask(unsigned long long x) { return __popcll(x); }
+
 template <typename Functor>
 __global__ __launch_bounds__(Functor::BlockSize, Functor::MinBlocksPerSM)
 void mult_for_each_n_kernel(size_t n, Functor functor)
@@ -94,6 +98,17 @@ void mult_for_each_n_kernel(size_t n, Functor functor)
     size_t i = static_cast<size_t>(blockIdx.x) * Functor::BlockSize + threadIdx.x;
     if (i < n) functor(i);
 }
+
+#if defined(__HIP_PLATFORM_AMD__)
+// The same, for a chunk of the threads starting at offset (see launch_mult_for_each_n).
+template <typename Functor>
+__global__ __launch_bounds__(Functor::BlockSize, Functor::MinBlocksPerSM)
+void mult_for_each_n_kernel_at(size_t n, Functor functor, size_t offset)
+{
+    size_t i = offset + static_cast<size_t>(blockIdx.x) * Functor::BlockSize + threadIdx.x;
+    if (i < n) functor(i);
+}
+#endif
 
 template <typename Functor>
 inline void launch_mult_for_each_n(size_t n_subwarps, Functor functor,
@@ -103,8 +118,17 @@ inline void launch_mult_for_each_n(size_t n_subwarps, Functor functor,
     constexpr int BS = Functor::BlockSize;
     constexpr int SW = Functor::SubwarpSize;
     const size_t n_threads = n_subwarps * SW;
+#if defined(__HIP_PLATFORM_AMD__)
+    // HIP limits grid x block per dimension to below 2^32 work-items: launch in chunks of at most that many.
+    constexpr size_t MAX_THREADS = ((size_t)UINT32_MAX / BS) * BS;
+    for (size_t offset = 0; offset < n_threads; offset += MAX_THREADS) {
+        const size_t this_n = std::min(n_threads - offset, MAX_THREADS);
+        mult_for_each_n_kernel_at<Functor><<<(this_n + BS - 1) / BS, BS, 0, stream>>>(n_threads, functor, offset);
+    }
+#else
     const size_t grid = (n_threads + BS - 1) / BS;
     mult_for_each_n_kernel<Functor><<<grid, BS, 0, stream>>>(n_threads, functor);
+#endif
 }
 
 template <typename ElemT>
@@ -626,11 +650,21 @@ public:
 		// Per-SUBWARP ballot mask — covers this group's lanes within the
 		// containing CUDA warp. With multiple groups per warp (SUBWARP < 32),
 		// each group masks the warp-wide ballot to its own bit-range.
+#if defined(__HIP_PLATFORM_AMD__)
+		// AMD: 64-lane wavefronts, so lane indices run to 63 and lane masks are 64-bit.
+		using lane_mask_t = unsigned long long;
+		const unsigned lane_in_warp  = static_cast<unsigned>(threadIdx.x) % 64u;
+		const unsigned group_in_warp = lane_in_warp / static_cast<unsigned>(SUBWARP);
+		const lane_mask_t subwarp_lanes = (SUBWARP == 64) ? ~0ull : ((1ull << SUBWARP) - 1ull);
+		const lane_mask_t subwarp_mask  = subwarp_lanes << (group_in_warp * SUBWARP);
+#else
+		using lane_mask_t = unsigned;
 		const unsigned lane_in_warp  = static_cast<unsigned>(threadIdx.x) % 32u;
 		const unsigned group_in_warp = lane_in_warp / static_cast<unsigned>(SUBWARP);
 		const unsigned subwarp_lanes = (SUBWARP == 32) ? 0xFFFFFFFFu
 		                                               : ((1u << SUBWARP) - 1u);
 		const unsigned subwarp_mask  = subwarp_lanes << (group_in_warp * SUBWARP);
+#endif
 
 		// k_lo/k_hi/k_iters depend only on ibst (constant for this thread);
 		// hoist outside the ja loop so the compiler sees they are loop-invariant
@@ -662,17 +696,17 @@ public:
 				// Per-group ballot. __ballot_sync(subwarp_mask,...) zeroes
 				// bits outside the mask so warp_ballot is already confined
 				// to this group; no shift needed for rank or total.
-				unsigned warp_ballot = __ballot_sync(subwarp_mask, valid);
+				lane_mask_t warp_ballot = __ballot_sync(subwarp_mask, valid);
 
 				if (valid) {
-					int rank = __popc(warp_ballot & ((1u << lane_in_warp) - 1u));
+					int rank = sbd_popc_mask(warp_ballot & ((lane_mask_t(1) << lane_in_warp) - 1));
 					int slot = buf_base + s_count + rank;
 					s_idxb[slot] = idxb;
 					s_ja  [slot] = ja;
 					s_k   [slot] = k;
 				}
 				// All lanes compute __popc(warp_ballot) identically — no syncwarp.
-				s_count += __popc(warp_ballot);
+				s_count += sbd_popc_mask(warp_ballot);
 
 				// Dispatch when a full SUBWARP batch has accumulated.
 				// s_count < 2*SUBWARP at this point (invariant: s_count was

@@ -28,6 +28,22 @@ int main(int argc, char * argv[]) {
   int mpi_master = 0;
   int mpi_rank; MPI_Comm_rank(comm,&mpi_rank);
   int mpi_size; MPI_Comm_size(comm,&mpi_size);
+
+#ifdef SBD_THRUST
+  // one GPU per rank, as the TPB app does (a rank that sees a single GPU keeps device 0)
+  {
+    int numDevices = 0, myDevice = 0;
+#ifdef __CUDACC__
+    cudaGetDeviceCount(&numDevices);
+    myDevice = numDevices > 0 ? mpi_rank % numDevices : 0;
+    cudaSetDevice(myDevice);
+#else
+    hipGetDeviceCount(&numDevices);
+    myDevice = numDevices > 0 ? mpi_rank % numDevices : 0;
+    hipSetDevice(myDevice);
+#endif
+  }
+#endif
   
   auto sbd_data = sbd::caop::generate_sbd_data(argc,argv);
 

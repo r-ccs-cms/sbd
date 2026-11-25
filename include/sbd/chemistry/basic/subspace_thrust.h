@@ -53,8 +53,10 @@ struct HostSubspace {
     }
 };
 
+#ifndef SBD_USE_CUBLAS // with cuBLAS, framework/cublas_utility.h (via thrust_kernels.h) defines it
 template <typename T>
 inline T* raw_ptr(thrust::device_vector<T>& v) { return thrust::raw_pointer_cast(v.data()); }
+#endif
 template <typename T>
 inline T* raw_ptr(std::vector<T>& v) { return v.data(); }
 

@@ -1,0 +1,22 @@
+# GDB app, Thrust backend on AMD GPUs, built with hipcc (rocThrust, hipCUB). Use with: make -f Makefile.hip
+# Path to the SBD library
+SBD_PATH=../..
+# MPI C++ wrapper driving hipcc, e.g. for MPICH:  export MPICH_CXX=hipcc   (Open MPI: export OMPI_CXX=hipcc)
+# A GPU-aware MPI (built with ROCm/HIP support) is needed for several ranks.
+CCCOM=mpicxx
+# GPU architecture: gfx90a = MI200 (MI210/MI250/MI250X), gfx942 = MI300
+GPU_ARCH=gfx90a
+CCFLAGS= --offload-arch=$(GPU_ARCH) -std=c++17 -O3 -fopenmp -DSBD_THRUST -Wno-unused-result -Wno-unused-variable
+LDFLAGS= --offload-arch=$(GPU_ARCH) -fopenmp
+# Hardware FP64 atomic add (gfx90a and later); hipcc otherwise uses a compare-and-swap loop. Valid for
+# hipMalloc'd memory, which is what Thrust's device vectors use.
+CCFLAGS+= -munsafe-fp-atomics
+# BLAS and LAPACK (OpenBLAS here); give the full path if a directory on -L also holds another MPI's libmpi
+SYSLIB= -lopenblas
+# hipBLAS for the Davidson vector operations (SBD_USE_CUBLAS):
+# CCFLAGS+= -DSBD_USE_CUBLAS
+# SYSLIB+= -L/opt/rocm/lib -lhipblas
+# Complex amplitudes:
+# CCFLAGS+= -D_COMPLEX
+# Unrestricted (UHF) integrals:
+# CCFLAGS+= -D_UHF

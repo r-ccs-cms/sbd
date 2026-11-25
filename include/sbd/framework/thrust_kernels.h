@@ -313,6 +313,7 @@ void BatchedInnerProduct(std::vector<thrust::device_vector<ElemT>>& X,
         InnerProduct(X[i], Y, Z[i], comm);
     }
 #else // #ifndef SBD_USE_CUBLAS
+    std::vector<RealT> res(num_X);
     for (int i = 0; i < num_X; i++) {
         res[i] = sbd::Dot(X[i], Y);
     }
