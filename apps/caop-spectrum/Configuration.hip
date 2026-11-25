@@ -8,5 +8,8 @@ CCCOM=mpicxx
 GPU_ARCH=gfx90a
 CCFLAGS= --offload-arch=$(GPU_ARCH) -std=c++17 -O3 -fopenmp -DSBD_THRUST -Wno-unused-result -Wno-unused-variable
 LDFLAGS= --offload-arch=$(GPU_ARCH) -fopenmp
+# Hardware FP64 atomic add (gfx90a and later); hipcc otherwise uses a compare-and-swap loop. Valid for
+# hipMalloc'd memory, which is what Thrust's device vectors use.
+CCFLAGS+= -munsafe-fp-atomics
 # BLAS and LAPACK (OpenBLAS here); give the full path if a directory on -L also holds another MPI's libmpi
 SYSLIB= -lopenblas
