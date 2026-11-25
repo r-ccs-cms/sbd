@@ -36,6 +36,39 @@ public:
     }
 
     /**
+         Sign of the opposite-spin (alpha-beta) double excitation term: alpha creation aCr and
+         annihilation aAn, beta creation bCr and annihilation bAn, on the bra determinant det.
+    */
+    __device__ __host__ double OppositeSpinSign(const size_t* det, int aCr, int aAn, int bCr, int bAn)
+    {
+        int p1 = std::min(aCr, aAn), q1 = std::max(aCr, aAn);
+        int p2 = std::min(bCr, bAn), q2 = std::max(bCr, bAn);
+        double s = 1.0;
+        this->parity(det, p1, q1, s);
+        if (p1 < bCr && bCr < q1) s *= -1.0;
+        if (p1 < bAn && bAn < q1) s *= -1.0;
+        this->parity(det, p2, q2, s);
+        return s;
+    }
+
+    /**
+         Add a block's opposite-spin sums acc[obC * norbs + obA] (one alpha excitation aCr -> aAn,
+         all beta excitations) to the two 2-RDM entries TwoDiffCorrelation adds them to.
+    */
+    __device__ void FlushOppositeSpin(int aCr, int aAn, const ElemT* acc, int tid, int nthreads)
+    {
+        const size_t n = this->norbs;
+        const size_t oaC = aCr / 2, oaA = aAn / 2;
+        for (size_t t = tid; t < n * n; t += nthreads) {
+            const ElemT v = acc[t];
+            if (v == ElemT(0)) continue;
+            const size_t obC = t / n, obA = t - obC * n;
+            sbd::atomic_add(twobody + 2 * twobody_size + (oaC + n * obC + n * n * (oaA + n * obA)), v);
+            sbd::atomic_add(twobody + 1 * twobody_size + (obC + n * oaC + n * n * (obA + n * oaA)), v);
+        }
+    }
+
+    /**
          Function for adding diagonal contribution
     */
     __device__ __host__ void ZeroDiffCorrelation(const size_t* det, ElemT WeightI)
@@ -142,13 +175,7 @@ public:
             int bCr = (i % 2 == 0) ? j : i;   // beta  creation
             int aAn = (a % 2 == 0) ? a : b;   // alpha annihilation
             int bAn = (a % 2 == 0) ? b : a;   // beta  annihilation
-            int p1 = std::min(aCr, aAn), q1 = std::max(aCr, aAn);
-            int p2 = std::min(bCr, bAn), q2 = std::max(bCr, bAn);
-            double s = 1.0;
-            this->parity(det, p1, q1, s);
-            if (p1 < bCr && bCr < q1) s *= -1.0;
-            if (p1 < bAn && bAn < q1) s *= -1.0;
-            this->parity(det, p2, q2, s);
+            double s = OppositeSpinSign(det, aCr, aAn, bCr, bAn);
             int oaC = aCr / 2, oaA = aAn / 2, obC = bCr / 2, obA = bAn / 2;
             sbd::atomic_add(twobody + 2 * twobody_size + (oaC + this->norbs * obC + this->norbs * this->norbs * (oaA + this->norbs * obA)), ElemT(s) * Conjugate(WeightI) * WeightJ);
             sbd::atomic_add(twobody + 1 * twobody_size + (obC + this->norbs * oaC + this->norbs * this->norbs * (obA + this->norbs * oaA)), ElemT(s) * Conjugate(WeightI) * WeightJ);

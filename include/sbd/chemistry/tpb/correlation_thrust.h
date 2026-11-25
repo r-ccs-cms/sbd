@@ -148,6 +148,63 @@ public:
 };
 
 
+// Same terms as CorrelationAlphaBeta, one block per alpha single excitation: the block's threads loop over
+// the beta singles and sum into shared memory acc[obC * norbs + obA] (for a fixed alpha excitation both
+// 2-RDM targets depend only on the beta pair), then the block adds the sums to the 2-RDM. This replaces
+// one global atomic per (alpha, beta) pair by one per (alpha excitation, beta orbital pair).
+template <typename ElemT>
+class CorrelationAlphaBetaShared : public CorrelationKernelBase<ElemT>
+{
+protected:
+    TaskHelpersThrust<ElemT> helper;
+public:
+    CorrelationAlphaBetaShared(const TaskHelpersThrust<ElemT>& h,
+                const MultTPBThrust<ElemT>& data,
+                const thrust::device_vector<ElemT>& v_wb,
+                const thrust::device_vector<ElemT>& v_t,
+                thrust::device_vector<ElemT>& b1,
+                thrust::device_vector<ElemT>& b2
+                ) : CorrelationKernelBase<ElemT>(data, v_wb, v_t, b1, b2)
+    {
+        helper = h;
+    }
+
+    __device__ void operator()(ElemT* acc, size_t j)
+    {
+        const size_t nn = this->norbs * this->norbs;
+        for (size_t t = threadIdx.x; t < nn; t += blockDim.x) acc[t] = ElemT(0);
+        __syncthreads();
+
+        const size_t ia = helper.SinglesFromAlphaBraIndex[j];
+        const size_t ja = helper.SinglesFromAlphaKetIndex[j];
+        const int aCr = helper.SinglesAlphaCrAnSM[j];
+        const int aAn = helper.SinglesAlphaCrAnSM[j + helper.size_single_alpha];
+        const size_t braBetaSize = helper.braBetaEnd - helper.braBetaStart;
+        const size_t ketBetaSize = helper.ketBetaEnd - helper.ketBetaStart;
+        for (size_t k = threadIdx.x; k < helper.size_single_beta; k += blockDim.x) {
+            const size_t ib = helper.SinglesFromBetaBraIndex[k];
+            const size_t braIdx = (ia - helper.braAlphaStart) * braBetaSize + ib - helper.braBetaStart;
+            if (this->mpi_size_h != 1 && (braIdx % this->mpi_size_h) != this->mpi_rank_h) continue;
+            const size_t jb = helper.SinglesFromBetaKetIndex[k];
+            const size_t ketIdx = (ja - helper.ketAlphaStart) * ketBetaSize + jb - helper.ketBetaStart;
+            const size_t* DetI = this->det_I + ((ia - helper.braAlphaStart) * this->bdets_size + ib - helper.braBetaStart) * this->D_size;
+            const int bCr = helper.SinglesBetaCrAnSM[k];
+            const int bAn = helper.SinglesBetaCrAnSM[k + helper.size_single_beta];
+            const double s = this->correlation.OppositeSpinSign(DetI, aCr, aAn, bCr, bAn);
+            sbd::atomic_add(acc + (bCr / 2) * this->norbs + bAn / 2, ElemT(s) * Conjugate(this->Wb[braIdx]) * this->T[ketIdx]);
+        }
+        __syncthreads();
+        this->correlation.FlushOppositeSpin(aCr, aAn, acc, threadIdx.x, blockDim.x);
+    }
+};
+
+template <typename Kernel, typename ElemT>
+__global__ void correlation_alpha_beta_shared(Kernel kernel, size_t j0)
+{
+    extern __shared__ double sbd_ab_acc[];
+    kernel(reinterpret_cast<ElemT*>(sbd_ab_acc), j0 + blockIdx.x);
+}
+
 template <typename ElemT>
 class CorrelationSingleAlpha : public CorrelationKernelBase<ElemT>
 {
@@ -623,12 +680,24 @@ void MultTPBThrust<ElemT>::correlation(const std::vector<ElemT> &W_in,
                 auto cid = thrust::counting_iterator<size_t>(0);
                 thrust::for_each_n(thrust::device, cid, size, double_kernel);
             } else {
-                size = helper[task].size_single_alpha * helper[task].size_single_beta;
-                CorrelationAlphaBeta kernel(helper[task], *this, W, T, onebody, twobody);
-                kernel.set_mpi_size(mpi_rank_h, mpi_size_h);
+                const size_t smem = this->norbs() * this->norbs() * sizeof(ElemT);
+                if (smem <= 48 * 1024) {  // norbs^2 sums in shared memory; otherwise the per-pair kernel
+                    CorrelationAlphaBetaShared<ElemT> kernel(helper[task], *this, W, T, onebody, twobody);
+                    kernel.set_mpi_size(mpi_rank_h, mpi_size_h);
+                    const size_t nblocks = helper[task].size_single_alpha, max_blocks = size_t(1) << 20;
+                    for (size_t j0 = 0; j0 < nblocks; j0 += max_blocks) {
+                        const unsigned int nb = static_cast<unsigned int>(std::min(max_blocks, nblocks - j0));
+                        correlation_alpha_beta_shared<CorrelationAlphaBetaShared<ElemT>, ElemT><<<nb, 256, smem>>>(kernel, j0);
+                    }
+                    SBD_CHECK_CUDA(cudaGetLastError());
+                } else {
+                    size = helper[task].size_single_alpha * helper[task].size_single_beta;
+                    CorrelationAlphaBeta kernel(helper[task], *this, W, T, onebody, twobody);
+                    kernel.set_mpi_size(mpi_rank_h, mpi_size_h);
 
-                auto ci = thrust::counting_iterator<size_t>(0);
-                thrust::for_each_n(thrust::device, ci, size, kernel);
+                    auto ci = thrust::counting_iterator<size_t>(0);
+                    thrust::for_each_n(thrust::device, ci, size, kernel);
+                }
             }
         } else {    // no collapse
             size = braAlphaSize * braBetaSize;
