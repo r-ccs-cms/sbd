@@ -5,6 +5,9 @@
 #ifndef SBD_CHEMISTRY_TPB_CORRELATION_THRUST_H
 #define SBD_CHEMISTRY_TPB_CORRELATION_THRUST_H
 
+#include <algorithm>
+#include <limits>
+
 namespace sbd
 {
 
@@ -627,8 +630,14 @@ void MultTPBThrust<ElemT>::correlation(const std::vector<ElemT> &W_in,
                 CorrelationAlphaBeta kernel(helper[task], *this, W, T, onebody, twobody);
                 kernel.set_mpi_size(mpi_rank_h, mpi_size_h);
 
-                auto ci = thrust::counting_iterator<size_t>(0);
-                thrust::for_each_n(thrust::device, ci, size, kernel);
+                // Bound launch size independently of CUB's items per block.
+                constexpr size_t max_items_per_launch = std::numeric_limits<int>::max();
+                for (size_t first = 0; first < size;) {
+                    const size_t count = std::min(max_items_per_launch, size - first);
+                    auto ci = thrust::counting_iterator<size_t>(first);
+                    thrust::for_each_n(thrust::device, ci, count, kernel);
+                    first += count;
+                }
             }
         } else {    // no collapse
             size = braAlphaSize * braBetaSize;
